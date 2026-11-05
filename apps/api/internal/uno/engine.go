@@ -12,11 +12,11 @@ import (
 )
 
 var (
-	ErrGameNotActive = errors.New("uno game is not active")
-	ErrNotYourTurn   = errors.New("it is not the player's turn")
-	ErrInvalidCard   = errors.New("card cannot be played")
-	ErrInvalidAction = errors.New("uno action is invalid")
-	ErrNotOwner      = errors.New("user is not the game owner")
+	ErrGameNotActive    = errors.New("uno game is not active")
+	ErrNotYourTurn      = errors.New("it is not the player's turn")
+	ErrInvalidCard      = errors.New("card cannot be played")
+	ErrInvalidAction    = errors.New("uno action is invalid")
+	ErrNotOwner         = errors.New("user is not the game owner")
 	ErrNotEnoughPlayers = errors.New("the game needs more players")
 )
 

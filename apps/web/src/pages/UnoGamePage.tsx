@@ -11,10 +11,20 @@ const UNO_GAME_ASSET_VERSION = 'radial-table-20261105-v21'
 const BOT_NAMES = ['Nova', 'Pixel', 'Orbit', 'Mochi', 'Rook', 'Echo', 'Ziggy', 'Comet', 'Miso', 'Vega', 'Tango', 'Kairo']
 const BOT_COLORS = ['#a78bfa', '#f0abfc', '#c4b5fd', '#93c5fd', '#f9a8d4', '#86efac', '#fcd34d', '#fdba74']
 
-function botAvatarUrl(matchID: string, index: number) {
-  const color = BOT_COLORS[(matchID.length + index * 3) % BOT_COLORS.length]
-  const accent = BOT_COLORS[(matchID.charCodeAt(index % Math.max(matchID.length, 1)) + index) % BOT_COLORS.length]
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="${color}"/><circle cx="40" cy="37" r="20" fill="#17131f" opacity=".9"/><circle cx="33" cy="35" r="4" fill="${accent}"/><circle cx="47" cy="35" r="4" fill="${accent}"/><path d="M28 48c7 8 17 8 24 0" fill="none" stroke="${accent}" stroke-width="4" stroke-linecap="square"/></svg>`
+function botAvatarUrl(matchID: string, botID: string) {
+  const seed = `${matchID}:${botID}`
+  const hash = [...seed].reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 2166136261)
+  const color = BOT_COLORS[hash % BOT_COLORS.length]
+  const accent = BOT_COLORS[(hash >>> 8) % BOT_COLORS.length]
+  const eyeY = 30 + (hash % 8)
+  const mouthY = 47 + ((hash >>> 4) % 7)
+  const shape = hash % 3
+  const decoration = shape === 0
+    ? `<path d="M10 17L24 7L31 18" fill="${accent}" opacity=".85"/><path d="M70 17L56 7L49 18" fill="${accent}" opacity=".85"/>`
+    : shape === 1
+      ? `<circle cx="13" cy="14" r="7" fill="${accent}" opacity=".85"/><circle cx="67" cy="14" r="7" fill="${accent}" opacity=".85"/>`
+      : `<rect x="9" y="9" width="13" height="13" rx="3" fill="${accent}" opacity=".85"/><rect x="58" y="9" width="13" height="13" rx="3" fill="${accent}" opacity=".85"/>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="${color}"/>${decoration}<circle cx="40" cy="40" r="24" fill="#17131f" opacity=".92"/><circle cx="32" cy="${eyeY}" r="4" fill="${accent}"/><circle cx="48" cy="${eyeY}" r="4" fill="${accent}"/><path d="M28 ${mouthY}c7 8 17 8 24 0" fill="none" stroke="${accent}" stroke-width="4" stroke-linecap="square"/></svg>`
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
@@ -112,7 +122,7 @@ export function UnoGamePage() {
         userId: player.id,
         username: player.name,
         host: player.id === currentGame?.createdBy,
-        avatarUrl: player.bot ? botAvatarUrl(gameID, player.id.length) : player.id === user?.id ? user.avatarUrl : null,
+        avatarUrl: player.bot ? botAvatarUrl(gameID, player.id) : player.id === user?.id ? user.avatarUrl : null,
         bot: player.bot,
         cardCount: player.cardCount,
         finished: player.finished,
@@ -133,7 +143,7 @@ export function UnoGamePage() {
         userId: `bot-${gameID}-${index}`,
         username: orderedBotNames[index % orderedBotNames.length],
         host: false,
-        avatarUrl: botAvatarUrl(gameID, index),
+        avatarUrl: botAvatarUrl(gameID, `bot-${gameID}-${index}`),
         bot: true,
         cardCount: 0,
         finished: false,
