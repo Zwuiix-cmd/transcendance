@@ -291,10 +291,7 @@ making the profile pages depend on the card engine or the file storage implement
 - React documentation: <https://react.dev/learn>.
 - Go documentation: <https://go.dev/doc/>.
 
-AI was used as a design and implementation assistant for the initial folder structure, API
-contract, security checklist, schema review, UI scaffolding and test planning. Team members must
-read, run, review and be able to explain every generated change. AI output is not a substitute for
-peer review, security review or the final contribution record.
+AI was used to assist with debugging, resolving incompatibility issues, and optimizing the codebase. Team members must read, run, review, and be able to explain every generated change. AI output is not a substitute for peer review, security review, or the final contribution record.
 
 ## Individual contributions
 
