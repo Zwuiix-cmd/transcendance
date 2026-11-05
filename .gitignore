@@ -15,7 +15,6 @@ npm-debug.log*
 # Go
 apps/cdn/bin/
 apps/cdn/*.test
-apps/cdn/assets/uno/
 
 # Python caches
 __pycache__/

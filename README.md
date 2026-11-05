@@ -1,14 +1,13 @@
-*This activity has been created as part of the 42 curriculum by ecochin, login2, login3, login4.*
+*This activity has been created as part of the 42 curriculum by Zwuiix, clfontai, julhang and two additional contributors.*
 
 # Uno Ranked
 
 ## Description
 
-Uno Ranked is a secure multiplayer Uno platform. The current milestone prepares the shared
-foundation: account creation and login, player profiles, waiting-game views, a leaderboard,
-and an API contract that the game implementation can use later. The 3D Uno client is now
-integrated and can be launched from custom tables; the Uno rules and live game board remain
-outside this milestone and will be implemented by another team member.
+Uno Ranked is a secure multiplayer Uno platform. It provides account creation and login,
+player profiles, ranked and unranked matchmaking, custom tables, a leaderboard, a protected
+administration workspace, and an integrated 3D Uno client. The API owns the match state and
+exposes server-authoritative start, state, draw and play endpoints for the multiplayer client.
 
 The application is split into four runtime services:
 
@@ -45,9 +44,10 @@ Implemented in this foundation:
   participant scores and atomic Uno statistics updates.
 - Docker Compose deployment with an HTTPS Caddy entry point.
 
-Not implemented yet:
+Known limitations:
 
-- Uno deck, turn rules, penalties, scoring and the live game board.
+- Complete production rules such as every penalty variant, scoring and final-match settlement
+  still need to be completed and validated in the 3D game.
 - Persistent matchmaking state is not implemented yet; the current queue is an in-memory Go
   service and will later hand tickets to the Uno game service.
 - Friends and online presence UI.
@@ -69,7 +69,7 @@ as required by the subject.
 
 ```sh
 make setup
-make uno-assets                         # extract the local Uno 3D CDN assets
+# The Uno 3D assets are already stored in apps/cdn/assets/uno.
 # Replace the API, CDN and game-service keys in .env with random secrets.
 make run-d                              # setup + build if needed + background mode
 # Or: make run                           # setup + build if needed + foreground mode
@@ -137,6 +137,10 @@ protected requests also send `Authorization: Bearer <token>`.
 | `POST` | `/api/v1/games/join` | Join a private lobby with its code |
 | `POST` | `/api/v1/games/{id}/join` | Join a lobby, optionally providing its code |
 | `POST` | `/api/v1/games/{id}/leave` | Leave a lobby as a participant |
+| `POST` | `/api/v1/games/{id}/uno/start` | Start the Uno game as the table owner |
+| `GET` | `/api/v1/games/{id}/uno/state` | Read the server-authoritative Uno snapshot |
+| `POST` | `/api/v1/games/{id}/uno/draw` | Draw a card during the current turn |
+| `POST` | `/api/v1/games/{id}/uno/play` | Play a card during the current turn |
 | `POST` | `/api/v1/games/{id}/result` | Settle a finished game from the internal game service |
 | `DELETE` | `/api/v1/games/{id}/participants/{userId}` | Kick a participant as the host |
 | `POST` | `/api/v1/games/{id}/whitelist` | Add a username to a private lobby whitelist |
@@ -163,8 +167,8 @@ account, only whitelisted accounts and the host may join. New accounts start at 
 Ranked and unranked are queue modes. Only a completed ranked game can affect ELO; unranked and
 custom games never change the rating. Custom games do not enter the matchmaking queue. Their full
 table configuration, including the optional `botsEnabled` flag, is stored with the lobby and
-returned to the future Uno game service. A custom-game owner can launch an incomplete table; the
-future game service decides how enabled bot seats behave.
+consumed by the Uno engine. A custom-game owner can launch alone when bots are enabled; when bots
+are disabled, the server requires at least two human participants before starting the game.
 
 The internal game service submits a result with `X-Game-Service-Key`, configured through
 `GAME_SERVICE_KEY`. A result must contain every participant exactly once, with contiguous
@@ -176,24 +180,28 @@ The complete request/response notes are in [`docs/api.md`](docs/api.md).
 
 ## Team information
 
-Replace the placeholder logins above before the peer review. The proposed roles are:
+The project is developed by a five-person team. Responsibilities are documented below
+according to the actual contributions to this project:
 
 | Member | Role(s) | Responsibilities |
 | --- | --- | --- |
-| `login1` | Product Owner / Developer | Product scope, backlog and API contracts |
-| `login2` | Project Manager / Developer | Planning, integration and delivery tracking |
-| `login3` | Technical Lead / Developer | Architecture, security and database |
-| `login4` | Developer | Uno game engine, real-time play and game UX |
+| `Zwuiix` | Team Leader / Product Owner / Backend contributor | Project concept and product direction, team leadership, and contribution to the backend implementation |
+| `clfontai` | REST API and CDN developer | REST API and CDN implementation, developed in collaboration with the team leader |
+| `julhang` | 3D game developer | Complete 3D client, scene, table, camera and 3D gameplay presentation |
+| Two additional team members | Developers | The remaining frontend, administration, integration and project modules |
 
-The exact assignment and individual contribution section must be updated by the team as work
-is merged. No contribution should be attributed automatically.
+The two additional contributors are intentionally grouped here because their individual
+usernames were not recorded in this README. Their work covers the remaining parts of the
+application.
 
 ## Project management
 
-The team should track work with GitHub Issues and a small Kanban board, review important pull
-requests before merging, and hold a weekly planning/check-in meeting. Day-to-day coordination
-can happen in the team Discord or Slack channel. Every member must create meaningful commits
-and be able to explain the code they contributed during peer review.
+The work was divided by product area and service boundary. Zwuiix led the product direction and
+worked on the backend, clfontai owned the REST API and CDN work with Zwuiix, julhang owned the
+3D client, and the two remaining developers handled the other application areas. Git and GitHub
+are used as the shared source-control and review history. The team coordinates implementation,
+integration and peer review directly, and every member must be able to explain the code they
+contributed during peer review.
 
 ## Technical stack
 
@@ -217,35 +225,42 @@ and be able to explain the code they contributed during peer review.
 
 ```text
 users 1 ───── 1 user_stats
-  │             
-  ├──────< auth_sessions
+  │ ├──────< auth_sessions
+  │ ├──────< games (created_by)
+  │ ├──────< game_participants >──── games
+  │ ├──────< game_spectators >────── games
+  │ ├──────< game_whitelist >─────── games
+  │ ├──────< user_elo_history >───── games
+  │ └──────< audit_logs (actor)
   │
-  └──────< games (created_by)
-                 │
-                 ├────< game_participants >──── users
-                 └────< game_whitelist >─────── users
+  └──── games 1 ───── 1 game_settings
+             │
+             └─────── 1 uno_game_states
 ```
 
-`users` stores the account identity, BCrypt hash, CDN avatar URL, ELO, persistent `player`/`staff`/`developer`/`admin` role and timestamps. `user_stats` stores Uno
-statistics without coupling them to authentication. `games` stores the lobby/history lifecycle,
-and `game_participants` is the composite-key link table for game scores and signed ELO deltas. Private lobby access
-codes and host-managed restrictions live in `game_whitelist`; `auth_sessions` is an additional
-security table used to revoke opaque login tokens.
+`users` stores the account identity, BCrypt hash, CDN avatar URL, ELO, role and timestamps.
+`user_stats` stores Uno statistics. `games` stores the lifecycle and mode, while
+`game_settings` stores custom-table rules. `game_participants` and `game_spectators` are
+composite-key membership tables. `uno_game_states` stores the versioned server-authoritative
+game snapshot as JSON. `game_whitelist` stores private-table access, `auth_sessions` stores
+revocable bearer sessions, `user_elo_history` stores rating events, and `audit_logs` stores
+security and administration events. The canonical columns, SQLite types and foreign keys are
+documented in [schema.sql](apps/api/db/schema.sql).
 
 The canonical schema is [`apps/api/db/schema.sql`](apps/api/db/schema.sql).
 
 ## Features and ownership
 
-The foundation is deliberately split into reviewable tasks:
-
-- API security and persistence: Technical Lead / API developer.
-- Authentication and profile screens: Frontend/API developers.
-- Games and leaderboard views: Frontend/API developers.
-- File CDN and asset delivery: Go developer.
-- Uno rules, live synchronization and game UX: game developer (next milestone).
-
-Update this section with the real Git authors and pull requests when the team has merged the
-work.
+| Feature | Contributors | What it provides |
+| --- | --- | --- |
+| Product direction and project leadership | Zwuiix | Project concept, priorities, integration decisions and team coordination |
+| Authentication and user management | Zwuiix and the two additional developers | Registration, login, profiles, sessions, validation and account lifecycle |
+| REST API and persistence | Zwuiix and clfontai | Go routes, SQLite schema, validation, matchmaking, game lifecycle and settlement |
+| CDN and avatar delivery | Zwuiix and clfontai | Namespaced file storage, avatar processing, cache headers and static Uno asset delivery |
+| Matchmaking and game tables | Zwuiix and the two additional developers | Ranked/unranked queues, custom tables, settings, invitations, spectators and presence |
+| 3D Uno client | julhang | Three.js scene, split model loading, cards, camera, table, seats and 3D presentation |
+| Administration and analytics | The two additional developers | PHP administration workspace, dashboards, audit logs and player analytics |
+| Server-authoritative Uno actions | Zwuiix and clfontai | Start, state, draw and play endpoints with turn and ownership checks |
 
 ## Modules and points plan
 
@@ -253,17 +268,18 @@ The subject requires at least 14 points. The following plan is intentionally con
 
 | Module | Type | Status / justification |
 | --- | --- | --- |
-| Frontend framework | Web minor | React + TypeScript frontend |
-| Public API | Web major | API key, rate limiting, documentation, and GET/POST/PUT/DELETE routes |
-| Custom design system | Web minor | Reusable accessible components and shared tokens |
-| Standard user management | User Management major | In progress: profile, CDN avatar storage, password hashing and sessions are ready; friends and online presence remain to be implemented |
-| Complete web game | Gaming major | Planned; cannot be claimed before Uno is playable |
-| Remote players | Gaming major | Planned after the real-time game protocol |
-| Multiplayer 3+ | Gaming major | Planned after the game exists |
-| Game statistics/history | User Management minor | Planned; dependency is the completed game |
+| Frontend framework | Web minor — 1 pt | Implemented with React, TypeScript, Vite and React Router |
+| Public API | Web major — 2 pts | API key, rate limiting, documentation and GET/POST/PUT/DELETE routes |
+| Custom design system | Web minor — 1 pt | Reusable accessible components, shared tokens and Papicons |
+| Standard user management | User Management major — 2 pts | Partial: profiles, avatars, authentication and roles exist; friends and online status remain incomplete |
+| Complete web game | Gaming major — 2 pts | Not claimable until the Uno rules, win/loss conditions and live match are complete |
+| Remote players | Gaming major — 2 pts | Not claimable until two remote clients can play the same live match reliably |
+| Multiplayer 3+ | Gaming major — 2 pts | Not claimable until three or more human players are synchronized in one game |
+| Game statistics/history | User Management minor — 1 pt | Not claimable until a complete playable game produces match history |
 
-The project currently has a working foundation, not 14 validated points. The team must only
-claim modules that are fully demonstrable during peer review.
+The currently validated foundation is 4 points. The remaining planned modules are listed for
+transparency but must not be claimed until they are fully functional and demonstrable during
+peer review. The final project must reach at least 14 validated points.
 
 ## Go responsibilities
 
@@ -279,8 +295,8 @@ ready for future user assets. Later iterations can add:
 4. Prometheus metrics for bytes served, cache hits and upload latency.
 5. Antivirus/content validation hooks before a file becomes public.
 
-This separation lets the teammate implement Uno behind the Go API's stable match ticket without
-making the profile pages depend on the card engine or the file storage implementation.
+This separation keeps profile pages independent from the card engine while allowing the web
+client to load the project-owned Uno assets and communicate with the authoritative API.
 
 ## Resources and AI usage
 
@@ -291,10 +307,21 @@ making the profile pages depend on the card engine or the file storage implement
 - React documentation: <https://react.dev/learn>.
 - Go documentation: <https://go.dev/doc/>.
 
-AI was used to assist with debugging, resolving incompatibility issues, and optimizing the codebase. Team members must read, run, review, and be able to explain every generated change. AI output is not a substitute for peer review, security review, or the final contribution record.
+AI was used as an engineering assistant for API and CDN debugging, route and schema review,
+Three.js asset integration, frontend iteration, performance checks and compatibility fixes.
+Generated suggestions were reviewed, adapted and tested by the team; AI did not replace design
+decisions, peer review, security review or responsibility for the final code. Every team member
+must understand and be able to explain the changes they submit.
 
 ## Individual contributions
 
-This section must be completed as the project evolves. For every member, record the concrete
-features/modules they implemented, the decisions they made, and the technical challenges they
-solved. Keep it aligned with the Git history rather than using generic descriptions.
+- **Zwuiix:** imagined the project, led the team, defined the product direction, contributed to
+  the backend, and worked with clfontai on the REST API and CDN integration. Key challenges were
+  keeping the browser, API, CDN and 3D client aligned while preserving server-side authority.
+- **clfontai:** implemented the REST API and CDN with Zwuiix, including route contracts, file
+  delivery and asset-serving integration.
+- **julhang:** implemented the complete 3D client and its scene presentation, including the
+  Three.js environment, split model loading, cards, table, seats and camera behavior.
+- **The two additional team members:** implemented the remaining frontend, administration and
+  integration work. Their individual usernames and exact feature lists must be added before
+  peer review.

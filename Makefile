@@ -6,8 +6,6 @@ API_DIR ?= apps/api
 WEB_DIR ?= apps/web
 ADMIN_DIR ?= apps/admin
 CDN_DIR ?= apps/cdn
-UNO_ARCHIVE ?= /home/enzo/Downloads/Uno.zip
-UNO_ASSETS_DIR ?= $(CDN_DIR)/assets/uno
 LOCAL_ARTIFACTS := $(API_DIR)/target $(WEB_DIR)/dist $(CDN_DIR)/bin
 
 DOCKER ?= docker
@@ -25,8 +23,7 @@ TAIL ?= 200
 	run run-d debug down logs ps \
 	secrets format \
 	admin-grant-email clean fclean reset-data require-env \
-	api-image api-test web-build web-test admin-image admin-test cdn-build cdn-image \
-	uno-assets
+	api-image api-test web-build web-test admin-image admin-test cdn-build cdn-image
 
 help:
 	@printf '%s\n' \
@@ -36,7 +33,6 @@ help:
 		'  setup                 Create .env if missing and install dependencies' \
 		'  install               Install frontend, CDN and Python tooling' \
 		'  secrets               Print fresh local API/CDN/game-service secrets' \
-		'  uno-assets            Extract and prepare the local Uno 3D assets' \
 		'' \
 		'Build and test:' \
 		'  build                 Build every local image and Go artifact' \
@@ -111,25 +107,6 @@ cdn-build:
 
 cdn-image:
 	$(DOCKER) build -t transcendence-cdn:dev -f $(CDN_DIR)/Dockerfile .
-
-uno-assets:
-	@test -f "$(UNO_ARCHIVE)" || { echo 'Missing Uno archive: $(UNO_ARCHIVE)' >&2; exit 1; }
-	rm -rf "$(UNO_ASSETS_DIR)"
-	mkdir -p "$(UNO_ASSETS_DIR)/.extract"
-	unzip -q "$(UNO_ARCHIVE)" -d "$(UNO_ASSETS_DIR)/.extract"
-	test -f "$(UNO_ASSETS_DIR)/.extract/Uno/index.html"
-	cp -R "$(UNO_ASSETS_DIR)/.extract/Uno/." "$(UNO_ASSETS_DIR)/"
-	rm -rf "$(UNO_ASSETS_DIR)/.extract"
-	mkdir -p "$(UNO_ASSETS_DIR)/vendor/three/build" "$(UNO_ASSETS_DIR)/vendor/three/examples" "$(UNO_ASSETS_DIR)/vendor/gsap"
-	cp -R "$(WEB_DIR)/node_modules/three/build/." "$(UNO_ASSETS_DIR)/vendor/three/build/"
-	cp -R "$(WEB_DIR)/node_modules/three/examples/jsm" "$(UNO_ASSETS_DIR)/vendor/three/examples/"
-	cp "$(WEB_DIR)/node_modules/gsap/index.js" "$(WEB_DIR)/node_modules/gsap/gsap-core.js" "$(WEB_DIR)/node_modules/gsap/CSSPlugin.js" "$(UNO_ASSETS_DIR)/vendor/gsap/"
-	sed -i \
-		-e 's#"three": "[^"]*"#"three": "/files/uno/vendor/three/build/three.module.js"#' \
-		-e 's#"three/addons/": "[^"]*"#"three/addons/": "/files/uno/vendor/three/examples/"#' \
-		-e 's#"gsap": "[^"]*"#"gsap": "/files/uno/vendor/gsap/index.js"#' \
-		"$(UNO_ASSETS_DIR)/index.html"
-	@echo 'Uno 3D assets are ready in $(UNO_ASSETS_DIR) and are intentionally ignored by Git.'
 
 build: api-image web-build admin-image cdn-build cdn-image
 

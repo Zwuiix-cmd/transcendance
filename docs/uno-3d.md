@@ -1,10 +1,11 @@
 # Uno 3D integration
 
 Uno 3D is an integral part of the platform. The compiled game and its local runtime assets are
-served by the project CDN at `/files/uno`; Vite does not extract or serve the archive.
+served by the project CDN at `/files/uno`; Vite does not extract or serve these assets.
 
-The assets are intentionally ignored by Git because the main model is approximately 805 MB.
-Deployments must provision the asset directory before starting Docker Compose.
+The complete asset bundle is stored in `apps/cdn/assets/uno/` as project assets. The large world
+model is split into CDN-served parts under `models/uno_parts/`, so no source archive is needed at
+runtime. Docker Compose mounts this directory read-only into the CDN container.
 
 ## Local access
 
@@ -21,14 +22,8 @@ From an authenticated lobby, the `Start Uno 3D` button moves the table to `in_pr
 https://localhost/uno?game=<game-id>
 ```
 
-Provision the local CDN directory with:
-
-```sh
-make uno-assets
-```
-
-The target extracts `Uno.zip`, copies the installed Three.js and GSAP runtime into the asset
-directory, and rewrites the archive import map to use `/files/uno/vendor/...` on the project CDN.
+No asset extraction step is required. After cloning the repository, `make run-d` serves the
+versioned files already present in `apps/cdn/assets/uno/`.
 
 ## Prepared match requests
 
@@ -41,5 +36,5 @@ directory, and rewrites the archive import map to use `/files/uno/vendor/...` on
 - `POST /api/v1/games/{id}/result`: final result sent by the future game service
 
 The platform wrapper sends the game a `postMessage` message of type `uno.bootstrap` containing
-`gameId`, the authenticated player and the table details. The archived game is currently an
-autonomous 3D client; the real-time backend can consume this context once it is connected.
+`gameId`, the authenticated player and the table details. The 3D client uses the server-owned
+Uno state endpoints for start, state, draw and play actions; the server remains authoritative.
