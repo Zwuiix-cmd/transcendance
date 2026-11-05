@@ -1,0 +1,11 @@
+.git
+.env
+data
+node_modules
+target
+dist
+apps/cdn/bin
+apps/cdn/assets/uno
+*.db
+*.db-shm
+*.db-wal

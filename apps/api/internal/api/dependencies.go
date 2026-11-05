@@ -1,0 +1,107 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"net/http"
+	"time"
+
+	"card-arena/api/internal/matchmaking"
+	"card-arena/api/internal/model"
+)
+
+// Database exposes the API database to route-owned handlers.
+func (server *Server) Database() *sql.DB {
+	return server.store.DB
+}
+
+// Profile loads a user profile for a route-owned handler.
+func (server *Server) Profile(id string, includeEmail bool) (model.User, error) {
+	return server.profile(id, includeEmail)
+}
+
+// IssueSession creates a session for a route-owned handler.
+func (server *Server) IssueSession(user model.User, request *http.Request) (model.AuthResponse, error) {
+	return server.issueSession(user, request)
+}
+
+// Analytics exposes the domain computation to route-owned analytics endpoints.
+func (server *Server) Analytics(id string) (model.UserAnalytics, error) {
+	return server.analytics(id)
+}
+
+// AvatarURL resolves the public avatar URL used by route-owned listings.
+func (server *Server) AvatarURL(id string, current *string) *string {
+	return server.avatarURL(id, current)
+}
+
+// ProfileWithAvatar loads a profile and resolves its public avatar URL.
+func (server *Server) ProfileWithAvatar(id string, includeEmail bool) (model.User, error) {
+	return server.profileWithAvatar(id, includeEmail)
+}
+
+// UserID resolves the opaque authenticated user value exposed to route packages.
+func (server *Server) UserID(value any) (string, bool) {
+	user, ok := value.(*authUser)
+	if !ok || user == nil {
+		return "", false
+	}
+	return user.ID, true
+}
+
+// UserElo resolves the rating needed to create a matchmaking ticket.
+func (server *Server) UserElo(value any) (int, bool) {
+	user, ok := value.(*authUser)
+	if !ok || user == nil {
+		return 0, false
+	}
+	return user.Elo, true
+}
+
+// RouteQueue exposes the matchmaking service to the queue route.
+func (server *Server) RouteQueue() *matchmaking.Queue {
+	return server.queue
+}
+
+// CDNURL returns the internal CDN endpoint used by the avatar route.
+func (server *Server) CDNURL() string {
+	return server.cfg.CDNURL
+}
+
+// InternalCDNAPIKey returns the credential used for API-to-CDN avatar uploads.
+func (server *Server) InternalCDNAPIKey() string {
+	return server.cfg.InternalCDNAPIKey
+}
+
+// HTTPClient returns the server's configured outbound HTTP client.
+func (server *Server) HTTPClient() *http.Client {
+	return server.client
+}
+
+// AdminActor returns the identity established by the admin middleware.
+func (server *Server) AdminActor(value any) (id, username string, ok bool) {
+	user, ok := value.(*authUser)
+	if !ok || user == nil {
+		return "", "", false
+	}
+	return user.ID, user.Username, true
+}
+
+// RecordAudit lets route-owned mutation handlers preserve the server audit trail.
+func (server *Server) RecordAudit(actorID, actorUsername, action, targetType, targetID, details, severity, ipAddress, userAgent string) {
+	server.recordAudit(actorID, actorUsername, action, targetType, targetID, details, severity, ipAddress, userAgent)
+}
+
+// ClientKey resolves the request origin used in audit records.
+func (server *Server) ClientKey(request *http.Request) string {
+	return server.clientKey(request)
+}
+
+// CacheGetJSON and CacheSetJSON reuse the server's configured cache connection.
+func (server *Server) CacheGetJSON(ctx context.Context, key string, target any) bool {
+	return server.cache.GetJSON(ctx, key, target)
+}
+
+func (server *Server) CacheSetJSON(ctx context.Context, key string, value any, ttl time.Duration) {
+	server.cache.SetJSON(ctx, key, value, ttl)
+}

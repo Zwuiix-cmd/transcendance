@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4f5f2" />
+    <meta name="description" content="Uno Ranked — a simple competitive Uno platform." />
+    <link rel="icon" type="image/svg+xml" href="/uno.svg" />
+    <title>Uno Ranked</title>
+    <style>
+      .initial-shell { min-height: 100vh; display: grid; place-content: center; gap: 12px; padding: 24px; color: #eeeaf7; background: #09080d; font: 16px system-ui, sans-serif; }
+      .initial-shell strong { color: #a78bfa; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+      .initial-shell h1 { margin: 0; font-size: clamp(2rem, 7vw, 4rem); letter-spacing: -.06em; }
+      .initial-shell p { margin: 0; color: #8e879d; }
+    </style>
+  </head>
+  <body>
+    <div id="root"><main class="initial-shell" aria-busy="true"><strong>Uno Ranked</strong><h1>A calmer way to play Uno.</h1><p>Loading your table…</p></main></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,39 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+/en.subject.pdf
+apps/web/.env
+apps/web/.env.*
+!apps/web/.env.example
+
+# Node
+apps/web/node_modules/
+apps/web/dist/
+npm-debug.log*
+
+# Go
+apps/cdn/bin/
+apps/cdn/*.test
+apps/cdn/assets/uno/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local runtime data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/tasks.json
+.venv/
+*.iml
+.DS_Store
