@@ -98,6 +98,14 @@ export function createWorldControl(scene) {
         }
     }
 
+    window.addEventListener('keydown', (event) => {
+        if (event.key !== 'F1') return;
+        event.preventDefault();
+        if (event.repeat) return;
+        essential = !essential;
+        loadWorld();
+    });
+
     loadWorld();
     return ready;
 }

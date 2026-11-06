@@ -4,7 +4,7 @@ import { gsap } from 'gsap';
 export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}, seatCount = 4, startingHandSize = 7, roundTable = false, onAction = null) {
     const cardTextureLoader = new THREE.TextureLoader();
     const textures = new Map();
-    const tableHeight = roundTable ? 1.425 : 1.365;
+    const tableHeight = roundTable ? 1.455 : 1.365;
     const tableRadius = roundTable ? 1.15 + Math.max(0, seatCount - 4) * 0.035 : 0.8;
     const centralCardScale = roundTable ? 2.1 : 1;
     const centralCardRotation = Math.PI / 2;
@@ -174,7 +174,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
         selected.material.map = cardTexture(preview ? `${data.face}_${preview}` : data.face);
     }
 
-    const cardGeometry = new THREE.PlaneGeometry(0.25 * (166 / 257), 0.25);
+    const cardGeometry = new THREE.PlaneGeometry(0.18 * (166 / 257), 0.18);
 
     function createCard(x, z, faceName, rotationZ = 0, elevation = 0) {
         const material = new THREE.MeshStandardMaterial({
@@ -211,10 +211,10 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
             const radialZ = Math.cos(angle);
             const tangentX = Math.cos(angle);
             const tangentZ = -Math.sin(angle);
-            const handRadius = tableRadius * (id === myPlayer ? 0.7 : 0.74);
+            const handRadius = tableRadius * (id === myPlayer ? 0.68 : 0.72);
             const x = roundTable ? radialX * handRadius + tangentX * position : [position, -0.47, position, 0.47][id];
             const z = roundTable ? radialZ * handRadius + tangentZ * position : [0.47, position, -0.47, position][id];
-            const y = tableHeight + 0.035 + 0.0005 * (id < 2 ? i : hand.length - i);
+            const y = tableHeight + 0.0005 * (id < 2 ? i : hand.length - i);
             const rotation = roundTable ? angle + Math.PI : THREE.MathUtils.degToRad(-(id + 2) * 90);
 
             let hitArea = card.userData.hitArea;
@@ -230,6 +230,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
 
             const active = card === hovered || card === selected;
             card.scale.setScalar(card.userData.owner === myPlayer ? playerCardScale : 1);
+            hitArea.scale.copy(card.scale);
             const slide = active ? hoverDistance : 0;
             const destination = {
                 x: x + (roundTable ? radialX : [0, 1, 0, -1][id]) * slide,
@@ -262,7 +263,8 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
         camera.updateMatrixWorld();
         scene.updateMatrixWorld();
 
-        if (event) {
+        screenCenter.set(0, 0);
+        if (event && document.pointerLockElement !== canvas) {
             const bounds = canvas.getBoundingClientRect();
             screenCenter.set(
                 ((event.clientX - bounds.left) / bounds.width) * 2 - 1,

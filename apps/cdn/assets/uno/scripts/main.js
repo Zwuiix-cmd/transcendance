@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createWorldControl } from './world_control.js?v=radial-table-20261105-v10';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
 import { createCardsControl } from './cards_control.js?v=radial-table-20261105-v21';
 import { createPlayerHeads } from './player_heads.js?v=radial-table-20261105-v21';
@@ -37,111 +38,48 @@ if (networkMode) {
     }
 }
 
-function createWoodTexture(renderer) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 512;
-    const context = canvas.getContext('2d');
-    const center = canvas.width / 2;
-
-    context.fillStyle = '#8a4d28';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    for (let ring = 8; ring < center; ring += 7) {
-        context.beginPath();
-        for (let step = 0; step <= 360; step += 4) {
-            const angle = THREE.MathUtils.degToRad(step);
-            const wobble = Math.sin(angle * 5 + ring * 0.09) * 2.2 + Math.sin(angle * 11 - ring * 0.04) * 1.1;
-            const radius = ring + wobble;
-            const x = center + Math.cos(angle) * radius;
-            const y = center + Math.sin(angle) * radius;
-            if (step === 0) context.moveTo(x, y);
-            else context.lineTo(x, y);
-        }
-        context.strokeStyle = ring % 3 === 0 ? 'rgba(52, 25, 13, 0.24)' : 'rgba(238, 157, 91, 0.12)';
-        context.lineWidth = ring % 5 === 0 ? 2 : 1;
-        context.stroke();
-    }
-    for (let index = 0; index < 24; index += 1) {
-        const x = 18 + ((index * 149) % 476);
-        const y = 24 + ((index * 83) % 464);
-        context.beginPath();
-        context.ellipse(x, y, 8 + (index % 4) * 3, 3 + (index % 3) * 2, index * 0.4, 0, Math.PI * 2);
-        context.strokeStyle = 'rgba(45, 22, 12, 0.2)';
-        context.lineWidth = 2;
-        context.stroke();
-    }
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    return texture;
-}
-
-function addRoundTable(scene, count) {
+async function addRoundTable(scene, count) {
     if (!roundTable) return;
 
-    const tableRadius = 1.15 + Math.max(0, count - 4) * 0.035;
-    const woodTexture = createWoodTexture(renderer);
-    const wood = new THREE.MeshStandardMaterial({ map: woodTexture, color: 0xb16b3b, roughness: 0.86 });
-    const tableTop = new THREE.Mesh(new THREE.CylinderGeometry(tableRadius, tableRadius, 0.08, 64), wood);
-    tableTop.position.set(0, 1.37, 0);
-    tableTop.castShadow = true;
-    tableTop.receiveShadow = true;
-    scene.add(tableTop);
+    const loader = new GLTFLoader();
 
-    const seatMaterial = new THREE.MeshStandardMaterial({ color: 0x8b4f29, roughness: 0.86 });
-    const darkWood = new THREE.MeshStandardMaterial({ color: 0x4c2818, roughness: 0.9 });
-    const tableLegGeometry = new THREE.CylinderGeometry(0.11, 0.15, 1.3, 12);
-    for (let index = 0; index < 6; index += 1) {
-        const angle = (index / 6) * Math.PI * 2;
-        const leg = new THREE.Mesh(tableLegGeometry, darkWood);
-        const legRadius = tableRadius * 0.68;
-        leg.position.set(Math.sin(angle) * legRadius, 0.7, Math.cos(angle) * legRadius);
-        leg.castShadow = true;
-        leg.receiveShadow = true;
-        scene.add(leg);
-    }
+    const [tableGLB, chairGLB] = await Promise.all([
+        loader.loadAsync('./models/table.glb'),
+        loader.loadAsync('./models/chair.glb'),
+    ]);
+
     const chairRadius = tableRadius + 0.22;
-    const chairScale = Math.max(0.78, 1 - Math.max(0, count - 4) * 0.035);
-    const seatGeometry = new THREE.BoxGeometry(1.08, 0.1, 0.72);
-    const slatGeometry = new THREE.BoxGeometry(0.98, 0.075, 0.075);
-    const postGeometry = new THREE.BoxGeometry(0.085, 0.9, 0.085);
-    const armGeometry = new THREE.BoxGeometry(0.08, 0.08, 0.75);
-    const chairLegGeometry = new THREE.BoxGeometry(0.09, 0.52, 0.09);
-    const addPart = (chair, geometry, material, position, rotationX = 0) => {
-        const part = new THREE.Mesh(geometry, material);
-        part.position.set(...position);
-        part.rotation.x = rotationX;
-        part.castShadow = true;
-        part.receiveShadow = true;
-        chair.add(part);
-    };
-    for (let index = 0; index < count; index += 1) {
-        const angle = (index / count) * Math.PI * 2;
-        const chair = new THREE.Group();
-        chair.position.set(Math.sin(angle) * chairRadius, 0, Math.cos(angle) * chairRadius);
+
+    function prepareModel(model) {
+        model.traverse((object) => {
+            if (!object.isMesh) return;
+            object.castShadow = true;
+            object.receiveShadow = true;
+        });
+        const group = new THREE.Group();
+        group.add(model);
+        return group;
+    }
+
+    const table = prepareModel(tableGLB.scene);
+    table.scale.setScalar(1.44);
+    scene.add(table);
+
+    const chairTemplate = prepareModel(chairGLB.scene);
+    chairTemplate.setScalar
+    for (let id = 0; id < count; id++) {
+        const angle = (id / count) * Math.PI * 2;
+        const chair = chairTemplate.clone(true);
+        chair.position.set(
+            Math.sin(angle) * chairRadius,
+            1,
+            Math.cos(angle) * chairRadius
+        );
         chair.rotation.y = angle;
-        chair.scale.setScalar(chairScale);
-
-        addPart(chair, seatGeometry, darkWood, [0, 0.68, 0]);
-        for (let slat = 0; slat < 5; slat += 1)
-            addPart(chair, slatGeometry, seatMaterial, [0, 0.75, -0.25 + slat * 0.13]);
-        addPart(chair, postGeometry, darkWood, [-0.46, 1.12, 0.39], 0.22);
-        addPart(chair, postGeometry, darkWood, [0.46, 1.12, 0.39], 0.22);
-        for (let slat = 0; slat < 5; slat += 1) {
-            const y = 0.91 + slat * 0.16;
-            addPart(chair, slatGeometry, seatMaterial, [0, y, 0.39 + (y - 1) * 0.22], 0.22);
-        }
-        addPart(chair, armGeometry, darkWood, [-0.55, 0.98, 0.12], 0.22);
-        addPart(chair, armGeometry, darkWood, [0.55, 0.98, 0.12], 0.22);
-        addPart(chair, chairLegGeometry, darkWood, [-0.43, 0.4, -0.22], -0.08);
-        addPart(chair, chairLegGeometry, darkWood, [0.43, 0.4, -0.22], -0.08);
-        addPart(chair, chairLegGeometry, darkWood, [-0.43, 0.4, 0.28], 0.08);
-        addPart(chair, chairLegGeometry, darkWood, [0.43, 0.4, 0.28], 0.08);
-
         scene.add(chair);
     }
 }
+
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setClearColor('#2a384c');
@@ -155,7 +93,7 @@ renderer.clear();
 
 const scene = new THREE.Scene();
 await createWorldControl(scene);
-addRoundTable(scene, seatCount);
+await addRoundTable(scene, seatCount);
 
 new HDRLoader().load(
     './textures/misty_pines_4k.hdr',
