@@ -299,6 +299,14 @@ if (networkMode) {
     }, 1200);
 }
 
+let shaderOn = true;
+window.addEventListener('keydown', (event) => {
+    if (event.key !== 'F2') return;
+    event.preventDefault();
+    if (event.repeat) return;
+    shaderOn = !shaderOn;
+});
+
 const movement = new THREE.Vector3();
 let previousTime = 0;
 renderer.setAnimationLoop((milliseconds) => {
@@ -322,6 +330,11 @@ renderer.setAnimationLoop((milliseconds) => {
     updateHover();
 
     headDisplay.update();
-    cardTrail.update();
-    volumes.render(t, viewCamera);
+
+    if (shaderOn) {
+        cardTrail.update();
+        volumes.render(t, viewCamera);
+    } else {
+        renderer.render(scene, viewCamera);
+    }
 });
