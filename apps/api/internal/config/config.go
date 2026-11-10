@@ -9,6 +9,7 @@ import (
 
 // Config is the complete runtime configuration of the REST API.
 type Config struct {
+	Environment				 string
 	Port                     string
 	APIKey                   string
 	DatabasePath             string
@@ -34,6 +35,7 @@ type Config struct {
 // for local development and can be overridden by Docker Compose.
 func Load() Config {
 	return Config{
+		Environment:			  envOr("APP_ENV", "development"),
 		Port:                     envOr("PORT", "8080"),
 		APIKey:                   envOr("API_KEY", "dev-only-change-me"),
 		DatabasePath:             envOr("DATABASE_PATH", "./data/transcendance.db"),
