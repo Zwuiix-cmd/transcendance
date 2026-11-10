@@ -6,7 +6,7 @@ import type { UserAnalytics } from '../types'
 import { Button, Camera, Card, LoadingState, PageHeader, StatCard, TextArea, UserAvatar } from '../components/ui'
 import { requestErrorMessage } from '../utils/errors'
 import { formatDate } from '../utils/format'
-import { usePagePolling } from '../utils/polling'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
 
 export function ProfilePage() {
   const { user, refreshUser } = useAuth()
@@ -24,15 +24,13 @@ export function ProfilePage() {
       .then(setAnalytics)
       .catch((requestError) => setAnalyticsError(requestErrorMessage(requestError, 'Could not load player analytics.')))
   }, [user])
-  useEffect(() => {
-    if (!user) return undefined
+  useEffect(() => { loadAnalytics() }, [loadAnalytics])
+  const refreshAll = () => {
     loadAnalytics()
-    window.addEventListener('uno-ranked:elo-updated', loadAnalytics)
-    return () => {
-      window.removeEventListener('uno-ranked:elo-updated', loadAnalytics)
-    }
-  }, [loadAnalytics, user])
-  usePagePolling(loadAnalytics, 5000, Boolean(user))
+    void refreshUser().catch(() => undefined)
+  }
+  useRealtimeTopic(user ? `profile:${user.id}` : null, refreshAll)
+  useRealtimeResync(refreshAll)
   if (!user) return null
 
   const save = async (event: FormEvent) => {

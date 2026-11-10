@@ -19,6 +19,9 @@ func Handle(context *route.Context) {
 		gamesdependencies.WriteUnoError(context.Writer, err)
 		return
 	}
+	notifier := gamesdependencies.Notify(context)
+	notifier.PublishGame(context.Param("id"))
+	notifier.PublishLobbies()
 	gamesdependencies.WriteJSON(context.Writer, http.StatusOK, snapshot)
 }
 

@@ -36,3 +36,4 @@ data/
 .venv/
 *.iml
 .DS_Store
+docs/

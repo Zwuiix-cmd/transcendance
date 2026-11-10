@@ -32,6 +32,7 @@ func Handle(context *route.Context) {
 		gamesdependencies.WriteDatabaseError(context.Writer, err)
 		return
 	}
+	gamesdependencies.Notify(context).PublishGame(id)
 	gamesdependencies.WriteJSON(context.Writer, http.StatusOK, gamesdependencies.GameResponse(game, userID))
 }
 

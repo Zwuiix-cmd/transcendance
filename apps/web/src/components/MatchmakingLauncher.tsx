@@ -5,8 +5,8 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { AuthButton } from './AuthModal'
 import { ArrowRight, CardIcon, ChevronRight, Cross, Crown, Globe, Play } from './ui'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
 import type { MatchmakingStatus, QueueMode } from '../types'
-import { usePagePolling } from '../utils/polling'
 
 const MODES: Array<{ id: QueueMode; label: string; title: string; description: string }> = [
   { id: 'ranked', label: 'Ranked', title: 'Climb your rating', description: 'ELO changes. The search range widens while you wait.' },
@@ -49,17 +49,25 @@ const MatchmakingContext = createContext<MatchmakingContextValue | undefined>(un
 
 export function MatchmakingProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  const [queue, setQueue] = useState<MatchmakingStatus>(emptyQueue())
+  const [queue, setQueueState] = useState<MatchmakingStatus>(emptyQueue())
+  const [receivedAt, setReceivedAt] = useState(Date.now())
+  const [elapsed, setElapsed] = useState(0)
   const [launcherOpen, setLauncherOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  const setQueue = useCallback((status: MatchmakingStatus) => {
+    setQueueState(status)
+    setReceivedAt(Date.now())
+    setElapsed(0)
+  }, [])
 
   const refreshQueue = useCallback(async () => {
     try {
       setQueue(await api.matchmakingStatus())
     } catch {
-      // A transient status request must not interrupt the rest of the application.
+      return
     }
-  }, [])
+  }, [setQueue])
 
   useEffect(() => {
     if (!user) return
@@ -70,9 +78,19 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
     if (user) return
     setQueue(emptyQueue())
     setLauncherOpen(false)
-  }, [user])
+  }, [setQueue, user])
 
-  usePagePolling(refreshQueue, 1000, Boolean(queue.queued && !queue.matched))
+  useRealtimeTopic<MatchmakingStatus>(user ? `user:${user.id}` : null, (event) => {
+    if (event.event === 'matchmaking.updated') setQueue(event.payload)
+  })
+  useRealtimeResync(() => { if (user) void refreshQueue() })
+
+  const searching = queue.queued && !queue.matched
+  useEffect(() => {
+    if (!searching) return undefined
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - receivedAt) / 1000)), 1000)
+    return () => window.clearInterval(timer)
+  }, [receivedAt, searching])
 
   const startSearch = useCallback(async (mode: QueueMode) => {
     if (!user || busy) return false
@@ -86,7 +104,7 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
     } finally {
       setBusy(false)
     }
-  }, [busy, user])
+  }, [busy, setQueue, user])
 
   const leaveSearch = useCallback(async () => {
     if (busy) return
@@ -96,21 +114,21 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
       setQueue(emptyQueue())
       setLauncherOpen(false)
     } catch {
-      // Keep the launcher usable even if the cancellation request is delayed.
+      return
     } finally {
       setBusy(false)
     }
-  }, [busy])
+  }, [busy, setQueue])
 
   const value = useMemo<MatchmakingContextValue>(() => ({
-    queue,
+    queue: searching ? { ...queue, waitedSeconds: queue.waitedSeconds + elapsed } : queue,
     busy,
     launcherOpen,
     openLauncher: () => setLauncherOpen(true),
     closeLauncher: () => setLauncherOpen(false),
     startSearch,
     leaveSearch,
-  }), [busy, launcherOpen, leaveSearch, queue, startSearch])
+  }), [busy, elapsed, launcherOpen, leaveSearch, queue, searching, startSearch])
 
   return <MatchmakingContext.Provider value={value}>{children}</MatchmakingContext.Provider>
 }

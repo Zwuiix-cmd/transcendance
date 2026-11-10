@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Badge, Button, Card, LoadingState, PageHeader, UserAvatar } from '../components/ui'
 import { DEFAULT_GAME_SETTINGS } from '../gameSettings'
-import type { GameDetail } from '../types'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
+import type { GameDeletedEvent, GameDetail } from '../types'
 import { requestErrorMessage } from '../utils/errors'
 import './game-lobby.css'
 
@@ -24,25 +25,26 @@ export function GameLobbyPage() {
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState('')
 
+  const apply = (nextDetail: GameDetail) => {
+    if (nextDetail.game.status === 'in_progress') {
+      if (nextDetail.game.joined) {
+        navigate(`/uno?game=${encodeURIComponent(nextDetail.game.id)}`)
+        return
+      }
+      if (nextDetail.game.spectating) {
+        navigate(`/uno?game=${encodeURIComponent(nextDetail.game.id)}&spectate=1`)
+        return
+      }
+    }
+    setDetail(nextDetail)
+  }
+
   const load = async (showLoading = true) => {
     if (!id) return
     if (showLoading) setLoading(true)
     setError('')
     try {
-      const nextDetail = await api.getGame(id, !showLoading)
-      if (nextDetail.game.status === 'in_progress') {
-        if (nextDetail.game.joined) {
-          navigate(`/uno?game=${encodeURIComponent(nextDetail.game.id)}`)
-          return
-        }
-        if (nextDetail.game.spectating) {
-          navigate(`/uno?game=${encodeURIComponent(nextDetail.game.id)}&spectate=1`)
-          return
-        }
-      }
-      if (nextDetail.game.joined) void api.updateGamePresence(id, 'player')
-      if (nextDetail.game.spectating) void api.updateGamePresence(id, 'spectator')
-      setDetail(nextDetail)
+      apply(await api.getGame(id))
     } catch (requestError) {
       setError(requestErrorMessage(requestError, 'Could not load this game lobby.'))
     } finally {
@@ -50,13 +52,12 @@ export function GameLobbyPage() {
     }
   }
 
-  useEffect(() => {
-    void load()
-    const heartbeat = window.setInterval(() => {
-      void load(false)
-    }, 3000)
-    return () => window.clearInterval(heartbeat)
-  }, [id])
+  useEffect(() => { void load() }, [id])
+  useRealtimeTopic<GameDetail | GameDeletedEvent>(id ? `game:${id}` : null, (event) => {
+    if (event.event === 'game.updated') apply(event.payload as GameDetail)
+    if (event.event === 'game.deleted') navigate('/games')
+  })
+  useRealtimeResync(() => void load(false))
 
   const copyCode = async () => {
     const code = detail?.game.joinCode

@@ -36,6 +36,7 @@ func Handle(context *route.Context) {
 		gamesdependencies.WriteError(context.Writer, http.StatusNotFound, "not_whitelisted", "User is not on the lobby whitelist")
 		return
 	}
+	gamesdependencies.Notify(context).PublishGame(id)
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 

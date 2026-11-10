@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { api } from '../api/client'
+import { ApiClientError, api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { LoadingState, UserAvatar } from '../components/ui'
-import type { GameDetail, UnoSnapshot } from '../types'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
+import type { GameDeletedEvent, GameDetail, UnoActionRequest, UnoSnapshot } from '../types'
+import { requestErrorMessage } from '../utils/errors'
 import './uno-game.css'
 
 const UNO_GAME_ASSET_PATH = '/files/uno/index.html'
-const UNO_GAME_ASSET_VERSION = 'radial-table-20261105-v21'
+const UNO_GAME_ASSET_VERSION = 'realtime-20261110-v22'
 const BOT_NAMES = ['Nova', 'Pixel', 'Orbit', 'Mochi', 'Rook', 'Echo', 'Ziggy', 'Comet', 'Miso', 'Vega', 'Tango', 'Kairo']
 const BOT_COLORS = ['#a78bfa', '#f0abfc', '#c4b5fd', '#93c5fd', '#f9a8d4', '#86efac', '#fcd34d', '#fdba74']
 
@@ -36,6 +38,26 @@ function botNameOrder(matchID: string) {
   })
 }
 
+type FrameMessage =
+  | { type: 'uno.ready' }
+  | { type: 'uno.action'; id: number; action: UnoActionRequest }
+
+function newerSnapshot(current: UnoSnapshot | null, next: UnoSnapshot) {
+  return current && current.version >= next.version ? current : next
+}
+
+async function fetchSnapshot(gameID: string) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await api.getUnoState(gameID)
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status < 500 && error.status !== 409) return null
+      await new Promise((resolve) => window.setTimeout(resolve, 400 * (attempt + 1)))
+    }
+  }
+  return null
+}
+
 export function UnoGamePage() {
   const [searchParams] = useSearchParams()
   const { user, loading: authLoading } = useAuth()
@@ -47,6 +69,34 @@ export function UnoGamePage() {
   const [loading, setLoading] = useState(Boolean(gameID))
   const [error, setError] = useState('')
   const [accessGranted, setAccessGranted] = useState(!gameID)
+  const latest = useRef({ game, unoState, user })
+  latest.current = { game, unoState, user }
+
+  const applySnapshot = useCallback((snapshot: UnoSnapshot) => setUnoState((current) => newerSnapshot(current, snapshot)), [])
+
+  const enter = useCallback(async (initial: boolean) => {
+    if (!gameID || !user) return
+    if (initial) {
+      setLoading(true)
+      setError('')
+      setAccessGranted(false)
+    }
+    try {
+      if (spectatorMode) await api.spectateGame(gameID)
+      else await api.reconnectGame(gameID)
+      const detail = await api.getGame(gameID)
+      const snapshot = await fetchSnapshot(gameID)
+      setGame(detail)
+      if (snapshot) applySnapshot(snapshot)
+      setAccessGranted(true)
+    } catch (requestError) {
+      if (!initial) return
+      const code = requestError instanceof ApiClientError ? requestError.code : undefined
+      setError(code === 'game_finished' ? 'This game has already finished.' : spectatorMode ? 'This public game cannot be spectated.' : requestErrorMessage(requestError, 'Only the player who was already in this game can reconnect.'))
+    } finally {
+      if (initial) setLoading(false)
+    }
+  }, [applySnapshot, gameID, spectatorMode, user])
 
   useEffect(() => {
     if (authLoading) {
@@ -59,56 +109,52 @@ export function UnoGamePage() {
       if (gameID) setError('Sign in to enter this game.')
       return
     }
-    let active = true
-    setLoading(true)
-    setError('')
-    setAccessGranted(false)
-    const role = spectatorMode ? 'spectator' : 'player'
-    const enter = async () => {
-      try {
-        if (spectatorMode) await api.spectateGame(gameID)
-        else await api.reconnectGame(gameID)
-        const value = await api.getGame(gameID)
-        let snapshot: UnoSnapshot | null = null
-        try { snapshot = await api.getUnoState(gameID) } catch { /* The iframe retries while the game state is starting. */ }
-        if (active) {
-          setGame(value)
-          setUnoState(snapshot)
-          setAccessGranted(true)
-        }
-      } catch {
-        if (active) setError(spectatorMode ? 'This public game cannot be spectated.' : 'Only the player who was already in this game can reconnect.')
-      } finally {
-        if (active) setLoading(false)
-      }
+    void enter(true)
+  }, [authLoading, enter, gameID, user])
+
+  useRealtimeTopic<GameDetail | UnoSnapshot | GameDeletedEvent>(gameID && accessGranted && user ? `game:${gameID}` : null, (event) => {
+    if (event.event === 'game.updated') setGame(event.payload as GameDetail)
+    if (event.event === 'uno.state') applySnapshot(event.payload as UnoSnapshot)
+    if (event.event === 'game.deleted') {
+      setAccessGranted(false)
+      setError('This table was closed by its host.')
     }
-    void enter()
-    const heartbeat = window.setInterval(() => { void api.updateGamePresence(gameID, role).catch(() => undefined) }, 10000)
-    return () => { active = false; window.clearInterval(heartbeat) }
-  }, [authLoading, gameID, spectatorMode, user])
+  })
+  useRealtimeResync(() => { if (accessGranted) void enter(false) })
+
+  const postToFrame = useCallback((message: Record<string, unknown>) => {
+    frameRef.current?.contentWindow?.postMessage(message, window.location.origin)
+  }, [])
+
+  const runAction = useCallback(async (id: number, action: UnoActionRequest) => {
+    try {
+      const snapshot = action.type === 'draw' ? await api.drawUnoCard(gameID) : await api.playUnoCard(gameID, action.cardIndex, action.color)
+      applySnapshot(snapshot)
+      postToFrame({ type: 'uno.action.result', id, ok: true })
+    } catch (requestError) {
+      postToFrame({ type: 'uno.action.result', id, ok: false, message: requestErrorMessage(requestError, 'The table refused this move.') })
+    }
+  }, [applySnapshot, gameID, postToFrame])
 
   useEffect(() => {
-    if (!gameID || !accessGranted) return
-    let active = true
-    const refresh = async () => {
-      try {
-        const value = await api.getGame(gameID, true)
-        let snapshot: UnoSnapshot | null = null
-        try { snapshot = await api.getUnoState(gameID) } catch { /* Keep the last snapshot during a short API interruption. */ }
-        if (active) {
-          setGame(value)
-          if (snapshot) setUnoState(snapshot)
-        }
-      } catch {
-        // The 3D scene remains available if the lobby context is briefly unavailable.
+    if (!accessGranted || !gameID) return undefined
+    const onMessage = (event: MessageEvent<FrameMessage>) => {
+      if (event.origin !== window.location.origin || !frameRef.current || event.source !== frameRef.current.contentWindow) return
+      const data = event.data
+      if (!data || typeof data !== 'object') return
+      if (data.type === 'uno.ready') {
+        const { game: currentGame, unoState: snapshot, user: viewer } = latest.current
+        postToFrame({ type: 'uno.bootstrap', gameId: gameID, spectator: spectatorMode, player: viewer ? { id: viewer.id, username: viewer.username, avatarUrl: viewer.avatarUrl } : null, game: currentGame, snapshot })
       }
+      if (data.type === 'uno.action' && typeof data.id === 'number' && data.action && !spectatorMode) void runAction(data.id, data.action)
     }
-    const interval = window.setInterval(() => void refresh(), 3000)
-    return () => {
-      active = false
-      window.clearInterval(interval)
-    }
-  }, [accessGranted, gameID])
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [accessGranted, gameID, postToFrame, runAction, spectatorMode])
+
+  useEffect(() => {
+    if (unoState) postToFrame({ type: 'uno.state', snapshot: unoState })
+  }, [postToFrame, unoState])
 
   const currentGame = game?.game
   const participants = game?.participants ?? []
@@ -163,20 +209,11 @@ export function UnoGamePage() {
     return `${UNO_GAME_ASSET_PATH}${query.size ? `?${query.toString()}` : ''}`
   }, [gameID, handSize, seatCount, spectatorMode, user?.id])
 
-  const sendBootstrap = () => {
-    frameRef.current?.contentWindow?.postMessage({
-      type: 'uno.bootstrap',
-      gameId: gameID || null,
-      player: user ? { id: user.id, username: user.username, avatarUrl: user.avatarUrl } : null,
-      game,
-    }, window.location.origin)
-  }
-
   return <main className="uno-game-page">
     {error ? <p className="uno-game-warning">{error}</p> : null}
     {loading ? <div className="uno-game-loading"><LoadingState label="Loading match" /></div> : null}
     {accessGranted ? <>
-        <iframe ref={frameRef} className="uno-game-frame" title="Uno 3D game" src={frameSrc} onLoad={sendBootstrap} allow="fullscreen; pointer-lock" />
+        <iframe ref={frameRef} className="uno-game-frame" title="Uno 3D game" src={frameSrc} allow="fullscreen; pointer-lock" />
       <section className="uno-game-overlay" aria-label="Match information">
         <div className="uno-game-overlay-header">
           <div className="uno-game-header-meta">{gameID ? <span>#{gameID.slice(0, 8)}</span> : null}</div>

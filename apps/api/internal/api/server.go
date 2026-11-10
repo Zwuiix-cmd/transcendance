@@ -23,22 +23,26 @@ import (
 	"card-arena/api/internal/db"
 	"card-arena/api/internal/matchmaking"
 	"card-arena/api/internal/model"
+	"card-arena/api/internal/realtime"
 	unogame "card-arena/api/internal/uno"
 	"github.com/google/uuid"
 )
 
 type Server struct {
-	cfg              config.Config
-	store            *db.Store
-	cache            *cache.Cache
-	queue            *matchmaking.Queue
-	client           *http.Client
-	limiter          *rateLimiter
-	audit            *auditWriter
-	uno              *unogame.Engine
-	router           *Router
-	lobbyCleanupStop chan struct{}
-	lobbyCleanupDone chan struct{}
+	cfg             config.Config
+	store           *db.Store
+	cache           *cache.Cache
+	queue           *matchmaking.Queue
+	client          *http.Client
+	limiter         *rateLimiter
+	audit           *auditWriter
+	uno             *unogame.Engine
+	router          *Router
+	hub             *realtime.Hub
+	ctx             context.Context
+	cancel          context.CancelFunc
+	maintenanceStop chan struct{}
+	maintenanceDone chan struct{}
 }
 
 type authUser struct {
@@ -74,6 +78,8 @@ func (writer *responseRecorder) Write(body []byte) (int, error) {
 	return writer.ResponseWriter.Write(body)
 }
 
+func (writer *responseRecorder) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
+
 type rateLimiter struct {
 	mu      sync.Mutex
 	windows map[string]limitWindow
@@ -102,37 +108,32 @@ func (limiter *rateLimiter) allow(key string, limit int) (bool, int) {
 }
 
 func NewServer(cfg config.Config, store *db.Store) *Server {
-	server := &Server{cfg: cfg, store: store, cache: cache.New(cfg.RedisURL), queue: matchmaking.New(), client: &http.Client{Timeout: 10 * time.Second}, limiter: newRateLimiter(), uno: unogame.NewEngine(store.DB), lobbyCleanupStop: make(chan struct{}), lobbyCleanupDone: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	server := &Server{cfg: cfg, store: store, cache: cache.New(cfg.RedisURL), client: &http.Client{Timeout: 10 * time.Second}, limiter: newRateLimiter(), uno: unogame.NewEngine(store.DB), hub: realtime.NewHub(), ctx: ctx, cancel: cancel, maintenanceStop: make(chan struct{}), maintenanceDone: make(chan struct{})}
+	server.queue = matchmaking.New(server.publishMatchmaking)
+	server.uno.OnChange(server.publishUnoUpdate)
 	server.audit = newAuditWriter(store)
 	server.router = NewRouter(server)
-	go server.runLobbyCleanup()
+	server.queue.Start(time.Second)
+	go server.runMaintenance()
 	return server
 }
 
 func (server *Server) UnoGame() *unogame.Engine { return server.uno }
 
+// Hub exposes the realtime hub to tests and diagnostics.
+func (server *Server) Hub() *realtime.Hub { return server.hub }
+
 func (server *Server) Close() error {
-	close(server.lobbyCleanupStop)
-	<-server.lobbyCleanupDone
+	server.queue.Stop()
+	close(server.maintenanceStop)
+	<-server.maintenanceDone
+	server.hub.Close()
+	server.cancel()
 	if server.audit != nil {
 		server.audit.close()
 	}
 	return server.cache.Close()
-}
-
-func (server *Server) runLobbyCleanup() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-	defer close(server.lobbyCleanupDone)
-	for {
-		select {
-		case <-ticker.C:
-			cutoff := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano)
-			_, _ = server.store.DB.Exec(`DELETE FROM games WHERE status='waiting' AND (created_by IS NULL OR NOT EXISTS (SELECT 1 FROM game_participants p WHERE p.game_id=games.id AND p.user_id=games.created_by AND COALESCE(p.last_seen_at,games.created_at)>?))`, cutoff)
-		case <-server.lobbyCleanupStop:
-			return
-		}
-	}
 }
 
 // Handler exposes health probes and the versioned REST API.

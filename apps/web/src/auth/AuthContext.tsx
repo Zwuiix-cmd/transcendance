@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../api/client'
+import { realtime } from '../realtime/client'
 import type { AuthResponse, User } from '../types'
 
 const TOKEN_KEY = 'card-arena.access-token'
@@ -17,6 +18,13 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
+function applyToken(token: string | null) {
+  if (token) sessionStorage.setItem(TOKEN_KEY, token)
+  else sessionStorage.removeItem(TOKEN_KEY)
+  api.setToken(token)
+  realtime.setToken(token)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
@@ -24,39 +32,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const storedToken = sessionStorage.getItem(TOKEN_KEY)
     const staleDebugToken = !DEBUG_AUTH && storedToken === DEBUG_TOKEN
-    if (staleDebugToken) sessionStorage.removeItem(TOKEN_KEY)
     const token = DEBUG_AUTH ? DEBUG_TOKEN : staleDebugToken ? null : storedToken
-    api.setToken(token)
+    applyToken(token)
     if (!token) {
       setLoading(false)
       return
     }
-    if (DEBUG_AUTH) sessionStorage.setItem(TOKEN_KEY, DEBUG_TOKEN)
 
     api.me()
       .then(setUser)
       .catch(() => {
-        sessionStorage.removeItem(TOKEN_KEY)
-        api.setToken(null)
+        applyToken(null)
         setUser(null)
       })
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => realtime.onUnauthorized(() => {
+    applyToken(null)
+    setUser(null)
+  }), [])
+
   const value = useMemo<AuthContextValue>(() => ({
     user,
     loading,
     signIn: (response) => {
-      sessionStorage.setItem(TOKEN_KEY, response.accessToken)
-      api.setToken(response.accessToken)
+      applyToken(response.accessToken)
       setUser(response.user)
     },
     signOut: async () => {
       try {
         await api.logout()
       } finally {
-        sessionStorage.removeItem(TOKEN_KEY)
-        api.setToken(null)
+        applyToken(null)
         setUser(null)
       }
     },

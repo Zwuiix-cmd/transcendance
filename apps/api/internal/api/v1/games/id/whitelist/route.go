@@ -50,6 +50,7 @@ func Handle(context *route.Context) {
 		}
 		return
 	}
+	gamesdependencies.Notify(context).PublishGame(id)
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 

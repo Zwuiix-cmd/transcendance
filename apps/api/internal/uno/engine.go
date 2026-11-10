@@ -23,6 +23,16 @@ var (
 type Engine struct {
 	database *sql.DB
 	mu       sync.Mutex
+	onChange func(Update)
+}
+
+// Update describes a committed state change. Snapshot renders the state for
+// one viewer so that hands stay private to their owner.
+type Update struct {
+	GameID   string
+	Status   string
+	WinnerID string
+	Snapshot func(viewerID string) Snapshot
 }
 
 type card struct {
@@ -78,6 +88,17 @@ type Snapshot struct {
 
 func NewEngine(database *sql.DB) *Engine { return &Engine{database: database} }
 
+// OnChange registers the callback invoked after every committed mutation.
+func (engine *Engine) OnChange(callback func(Update)) { engine.onChange = callback }
+
+func (engine *Engine) emit(state *gameState) {
+	if engine.onChange == nil {
+		return
+	}
+	copied := *state
+	engine.onChange(Update{GameID: copied.GameID, Status: copied.Status, WinnerID: copied.WinnerID, Snapshot: func(viewerID string) Snapshot { return publicSnapshot(&copied, viewerID) }})
+}
+
 func (engine *Engine) Start(gameID, userID string) (Snapshot, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
@@ -112,6 +133,7 @@ func (engine *Engine) Start(gameID, userID string) (Snapshot, error) {
 	if err = tx.Commit(); err != nil {
 		return Snapshot{}, err
 	}
+	engine.emit(state)
 	return publicSnapshot(state, userID), nil
 }
 
@@ -227,6 +249,7 @@ func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int)
 	if err = tx.Commit(); err != nil {
 		return Snapshot{}, err
 	}
+	engine.emit(state)
 	return publicSnapshot(state, userID), nil
 }
 

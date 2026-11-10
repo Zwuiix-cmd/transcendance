@@ -253,3 +253,11 @@ export type ApiError = {
   code?: string
   message?: string
 }
+
+export type GameDeletedEvent = {
+  gameId: string
+}
+
+export type UnoActionRequest =
+  | { type: 'draw' }
+  | { type: 'play'; cardIndex: number; color: string | null }

@@ -6,7 +6,7 @@ import type { User, UserAnalytics } from '../types'
 import { ArrowLeft, Card, EmptyState, LoadingState, PageHeader, StatCard, UserAvatar } from '../components/ui'
 import { requestErrorMessage } from '../utils/errors'
 import { formatDate } from '../utils/format'
-import { usePagePolling } from '../utils/polling'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
 
 export function PublicProfilePage() {
   const { id } = useParams<{ id: string }>()
@@ -27,15 +27,9 @@ export function PublicProfilePage() {
       .catch((requestError) => setAnalyticsError(requestErrorMessage(requestError, 'Could not load player analytics.')))
   }, [id])
 
-  useEffect(() => {
-    if (!id) return undefined
-    loadProfile()
-    window.addEventListener('uno-ranked:elo-updated', loadProfile)
-    return () => {
-      window.removeEventListener('uno-ranked:elo-updated', loadProfile)
-    }
-  }, [id, loadProfile])
-  usePagePolling(loadProfile, 5000, Boolean(id))
+  useEffect(() => { loadProfile() }, [loadProfile])
+  useRealtimeTopic(id ? `profile:${id}` : null, loadProfile)
+  useRealtimeResync(loadProfile)
 
   if (loading) return <LoadingState label="Loading profile" />
   if (error || !profile) return <div className="page-stack"><PageHeader title="Profile unavailable" description={error || 'This player could not be found.'} /><Card><EmptyState title="No profile to show" description="The account may have been removed or the link is invalid." /><Link className="button button-secondary" to="/leaderboard">Back to leaderboard</Link></Card></div>

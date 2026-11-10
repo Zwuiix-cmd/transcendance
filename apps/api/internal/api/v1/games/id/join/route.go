@@ -102,6 +102,9 @@ func JoinGame(context *route.Context, database *sql.DB, id, userID, code string)
 		gamesdependencies.WriteDatabaseError(context.Writer, err)
 		return
 	}
+	notifier := gamesdependencies.Notify(context)
+	notifier.PublishGame(id)
+	notifier.PublishLobbies()
 	gamesdependencies.WriteJSON(context.Writer, http.StatusOK, gamesdependencies.GameResponse(game, userID))
 }
 
