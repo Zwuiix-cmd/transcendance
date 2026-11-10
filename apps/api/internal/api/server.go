@@ -178,10 +178,13 @@ func (server *Server) serveHTTP(writer http.ResponseWriter, request *http.Reques
 		limit = server.cfg.AdminRequestsPerMinute
 	}
 	allowed, retry := server.allowRate(request, "valid:"+clientKey, limit)
-	if !allowed {
-		writer.Header().Set("Retry-After", strconv.Itoa(retry))
-		writeError(writer, http.StatusTooManyRequests, "rate_limited", "Too many requests")
-		return
+
+	if server.cfg.Environment != "development" {
+		if !allowed {
+			writer.Header().Set("Retry-After", strconv.Itoa(retry))
+			writeError(writer, http.StatusTooManyRequests, "rate_limited", "Too many requests")
+			return
+		}
 	}
 
 	request, actor := server.cacheAuthentication(request)
