@@ -14,12 +14,7 @@ func Handle(context *route.Context) {
 	if !ok {
 		return
 	}
-	var allowed int
-	if err := server.Database().QueryRow(`SELECT EXISTS(SELECT 1 FROM game_participants WHERE game_id=? AND user_id=? OR EXISTS(SELECT 1 FROM game_spectators WHERE game_id=? AND user_id=?))`, context.Param("id"), userID, context.Param("id"), userID).Scan(&allowed); err != nil {
-		gamesdependencies.WriteDatabaseError(context.Writer, err)
-		return
-	}
-	if allowed == 0 {
+	if !gamesdependencies.HasGameAccess(server.Database(), context.Param("id"), userID) {
 		gamesdependencies.WriteError(context.Writer, http.StatusForbidden, "game_access_required", "Join or spectate this game before reading its state")
 		return
 	}

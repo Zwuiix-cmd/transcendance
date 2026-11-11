@@ -168,6 +168,7 @@ func HandleCreate(context *route.Context) {
 		gamesdependencies.WriteDatabaseError(context.Writer, err)
 		return
 	}
+	gamesdependencies.Notify(context).PublishLobbies()
 	gamesdependencies.WriteJSON(context.Writer, http.StatusCreated, gamesdependencies.GameResponse(game, userID))
 }
 

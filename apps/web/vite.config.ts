@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: 'http://localhost:8080',
           changeOrigin: true,
+          ws: true,
           headers: env.API_KEY ? { 'X-API-Key': env.API_KEY } : undefined,
         },
         '/admin': {

@@ -3,7 +3,17 @@ import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { AuthButton } from './AuthModal'
 import { MatchmakingLauncher, PlayButton } from './MatchmakingLauncher'
+import { useRealtimeStatus } from '../realtime/hooks'
 import { Button, ChevronDown, Logout, UnoLogo, UserAvatar } from './ui'
+
+function RealtimeBanner() {
+  const status = useRealtimeStatus()
+  if (status !== 'reconnecting' && status !== 'offline') return null
+  return <div className="realtime-banner" role="status">
+    <span className="realtime-banner-dot" aria-hidden="true" />
+    {status === 'offline' ? 'You are offline. Live updates resume when the connection is back.' : 'Reconnecting to live updates…'}
+  </div>
+}
 
 export function AppShell() {
   const { user, signOut } = useAuth()
@@ -64,6 +74,7 @@ export function AppShell() {
           </div>}
         </div>
       </header>
+      <RealtimeBanner />
       <main className="main-content"><Outlet /></main>
       <footer className="footer">
         <div><strong>Uno Ranked</strong><span>Competitive games, measured fairly.</span></div>

@@ -1,10 +1,11 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { GameRuleToggle as RuleToggle } from '../components/GameRuleToggle'
 import { Badge, Button, Card, EmptyState, Input, LinkIcon, LoadingState, PageHeader, UserAvatar } from '../components/ui'
 import { CUSTOM_HAND_OPTIONS, CUSTOM_PLAYER_OPTIONS, DEFAULT_GAME_SETTINGS, DRAW_PENALTY_OPTIONS } from '../gameSettings'
-import type { Game, GameDetail, GameSettings } from '../types'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
+import type { Game, GameDeletedEvent, GameDetail, GameSettings } from '../types'
 import { requestErrorMessage } from '../utils/errors'
 import { formatDateTime } from '../utils/format'
 
@@ -90,9 +91,23 @@ export function GamesPage() {
     void load()
     const gameId = searchParams.get('game')
     if (gameId) void inspect(gameId)
-    const interval = window.setInterval(() => void load(), 5000)
-    return () => window.clearInterval(interval)
   }, [searchParams])
+
+  const reloadTimer = useRef<number | undefined>(undefined)
+  const scheduleReload = () => {
+    window.clearTimeout(reloadTimer.current)
+    reloadTimer.current = window.setTimeout(() => void load(), 150)
+  }
+  useEffect(() => () => window.clearTimeout(reloadTimer.current), [])
+  useRealtimeTopic('lobbies', scheduleReload)
+  useRealtimeTopic<GameDetail | GameDeletedEvent>(selectedLobby ? `game:${selectedLobby.game.id}` : null, (event) => {
+    if (event.event === 'game.updated') setSelectedLobby(event.payload as GameDetail)
+    if (event.event === 'game.deleted') setSelectedLobby(null)
+  })
+  useRealtimeResync(() => {
+    void load()
+    if (selectedLobby) void inspect(selectedLobby.game.id)
+  })
 
   const create = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError(''); setMessage('')

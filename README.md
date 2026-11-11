@@ -209,6 +209,9 @@ contributed during peer review.
 - Administration: PHP 8.3 server-rendered shell, vanilla JavaScript charts and a restricted
   server-side proxy to the authenticated API.
 - API: Go 1.24, the standard-library `net/http` package, BCrypt, SQLite and an in-memory ELO queue.
+- Realtime: a WebSocket endpoint (`/api/v1/ws`, `github.com/coder/websocket`) with an in-process
+  hub that pushes lobby, table, matchmaking, leaderboard and profile changes; the web client does
+  not poll and the socket doubles as the presence signal.
 - Matchmaking: Go service with a synchronized ranked/unranked ELO queue behind the authenticated API.
 - File delivery: Go 1.24 standard library with a Python avatar script, Go SHA-256/FNV helpers,
   format detection, image dimensions and SVG safety checks.
@@ -257,7 +260,7 @@ The canonical schema is [`apps/api/db/schema.sql`](apps/api/db/schema.sql).
 | Authentication and user management | Zwuiix and the two additional developers | Registration, login, profiles, sessions, validation and account lifecycle |
 | REST API and persistence | Zwuiix and clfontai | Go routes, SQLite schema, validation, matchmaking, game lifecycle and settlement |
 | CDN and avatar delivery | Zwuiix and clfontai | Namespaced file storage, avatar processing, cache headers and static Uno asset delivery |
-| Matchmaking and game tables | Zwuiix and the two additional developers | Ranked/unranked queues, custom tables, settings, invitations, spectators and presence |
+| Matchmaking and game tables | Zwuiix and the two additional developers | Ranked/unranked queues, custom tables, settings, invitations, spectators and realtime presence |
 | 3D Uno client | julhang | Three.js scene, split model loading, cards, camera, table, seats and 3D presentation |
 | Administration and analytics | The two additional developers | PHP administration workspace, dashboards, audit logs and player analytics |
 | Server-authoritative Uno actions | Zwuiix and clfontai | Start, state, draw and play endpoints with turn and ownership checks |

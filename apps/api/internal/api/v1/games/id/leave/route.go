@@ -40,6 +40,9 @@ func Handle(context *route.Context) {
 		gamesdependencies.WriteError(context.Writer, http.StatusNotFound, "not_member", "User is not in this lobby")
 		return
 	}
+	notifier := gamesdependencies.Notify(context)
+	notifier.PublishGame(context.Param("id"))
+	notifier.PublishLobbies()
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 

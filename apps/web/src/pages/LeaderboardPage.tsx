@@ -4,7 +4,7 @@ import { api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { LeaderboardEntry, ProfileSearchResult } from '../types'
 import { Badge, Card, EmptyState, LoadingState, Search, UserAvatar } from '../components/ui'
-import { usePagePolling } from '../utils/polling'
+import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
 function PodiumCard({ entry }: { entry: LeaderboardEntry }) {
   return <Link to={`/players/${entry.userId}`} className={`podium-card podium-${entry.rank}`}><span className="podium-place">#{entry.rank}</span><UserAvatar username={entry.username} avatarUrl={entry.avatarUrl} className="podium-avatar" /><strong>{entry.username}</strong><span className="podium-elo">{entry.elo} ELO</span><span className="muted">{Math.round(entry.winRate * 100)}% win rate</span></Link>
 }
@@ -36,14 +36,9 @@ export function LeaderboardPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    loadLeaderboard()
-    window.addEventListener('uno-ranked:elo-updated', loadLeaderboard)
-    return () => {
-      window.removeEventListener('uno-ranked:elo-updated', loadLeaderboard)
-    }
-  }, [loadLeaderboard])
-  usePagePolling(loadLeaderboard, 5000)
+  useEffect(() => { loadLeaderboard() }, [loadLeaderboard])
+  useRealtimeTopic('leaderboard', loadLeaderboard)
+  useRealtimeResync(loadLeaderboard)
 
   const loadMore = async () => {
     if (loadingMore || !hasMore) return

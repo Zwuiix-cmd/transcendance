@@ -24,6 +24,11 @@ type dependencies interface {
 	ClientKey(*http.Request) string
 }
 
+type ratingNotifier interface {
+	PublishLeaderboard()
+	PublishProfile(string)
+}
+
 func Handle(context *route.Context) {
 	server, ok := context.Server.(dependencies)
 	if !ok {
@@ -59,6 +64,10 @@ func Handle(context *route.Context) {
 		_, _ = server.Database().Exec(`INSERT INTO user_elo_history(id,user_id,previous_elo,new_elo,delta,reason,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), id, previous, *input.Elo, *input.Elo-previous, "admin_adjustment", time.Now().UTC().Format(time.RFC3339Nano))
 	}
 	server.RecordAudit(adminID, adminUsername, "admin.user.elo_updated", "user", id, "ELO set to "+strconv.Itoa(*input.Elo), "warning", server.ClientKey(context.Request), context.Request.UserAgent())
+	if notifier, ok := context.Server.(ratingNotifier); ok && previous != *input.Elo {
+		notifier.PublishLeaderboard()
+		notifier.PublishProfile(id)
+	}
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 

@@ -22,6 +22,13 @@ type resultServer interface {
 	RecordAudit(string, string, string, string, string, string, string, string, string)
 }
 
+type resultNotifier interface {
+	PublishGame(string)
+	PublishLobbies()
+	PublishLeaderboard()
+	PublishProfile(string)
+}
+
 func Handle(context *route.Context) {
 	server, ok := context.Server.(resultServer)
 	if !ok {
@@ -70,6 +77,14 @@ func Handle(context *route.Context) {
 		participants = append(participants, model.GameResultParticipant{UserID: participant.UserID, Position: participant.Position, Score: participant.Score, EloDelta: participant.EloDelta})
 	}
 	server.RecordAudit("", "game-service", "game.result.settled", "game", context.Param("id"), "mode="+outcome.Mode, "info", server.ClientKey(context.Request), context.Request.UserAgent())
+	if notifier, ok := context.Server.(resultNotifier); ok && !outcome.AlreadySettled {
+		notifier.PublishGame(outcome.GameID)
+		notifier.PublishLobbies()
+		notifier.PublishLeaderboard()
+		for _, participant := range outcome.Participants {
+			notifier.PublishProfile(participant.UserID)
+		}
+	}
 	writeJSON(context.Writer, http.StatusOK, model.GameResultResponse{GameID: outcome.GameID, Mode: outcome.Mode, Status: outcome.Status, EndedAt: outcome.EndedAt, AlreadySettled: outcome.AlreadySettled, Participants: participants})
 }
 

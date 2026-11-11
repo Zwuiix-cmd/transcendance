@@ -64,6 +64,9 @@ func Handle(context *route.Context) {
 		return
 	}
 	server.RecordAudit(adminID, adminUsername, "admin.user.role_changed", "user", id, "Role set to "+role, "warning", server.ClientKey(context.Request), context.Request.UserAgent())
+	if notifier, ok := context.Server.(interface{ PublishProfile(string) }); ok {
+		notifier.PublishProfile(id)
+	}
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 

@@ -56,6 +56,9 @@ func Handle(context *route.Context) {
 		gamesdependencies.WriteDatabaseError(context.Writer, err)
 		return
 	}
+	notifier := gamesdependencies.Notify(context)
+	notifier.PublishGame(id)
+	notifier.PublishLobbies()
 	gamesdependencies.WriteJSON(context.Writer, http.StatusOK, gamesdependencies.GameResponse(game, userID))
 }
 
@@ -86,6 +89,9 @@ func HandleLeave(context *route.Context) {
 		gamesdependencies.WriteError(context.Writer, http.StatusNotFound, "not_spectating", "You are not spectating this game")
 		return
 	}
+	notifier := gamesdependencies.Notify(context)
+	notifier.PublishGame(context.Param("id"))
+	notifier.PublishLobbies()
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 

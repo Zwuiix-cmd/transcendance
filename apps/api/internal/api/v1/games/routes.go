@@ -7,7 +7,6 @@ import (
 	gamejoin "card-arena/api/internal/api/v1/games/id/join"
 	"card-arena/api/internal/api/v1/games/id/leave"
 	"card-arena/api/internal/api/v1/games/id/participants/user-id"
-	"card-arena/api/internal/api/v1/games/id/presence"
 	"card-arena/api/internal/api/v1/games/id/reconnect"
 	"card-arena/api/internal/api/v1/games/id/result"
 	"card-arena/api/internal/api/v1/games/id/spectate"
@@ -41,7 +40,6 @@ func Definitions() []route.RegisteredRoute {
 		whitelistuser.Definition,
 		participantuser.Definition,
 		reconnect.Definition,
-		presence.Definition,
 		spectate.Definition,
 		spectate.LeaveDefinition,
 	}

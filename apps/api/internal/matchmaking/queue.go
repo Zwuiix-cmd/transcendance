@@ -17,36 +17,115 @@ type ticket struct {
 	createdAt time.Time
 	matchedAt time.Time
 	players   []ticket
+	lastSent  fingerprint
+	announced bool
 }
 
-// Queue is an in-memory ranked/unranked queue. Games are created by the game
-// engine after a match; the REST API only exposes the queue state.
+type fingerprint struct {
+	matched   bool
+	position  int
+	queueSize int
+	gap       int
+}
+
+// Notifier receives the new queue status of a user every time it changes.
+type Notifier func(userID string, status model.MatchmakingStatus)
+
+// Queue is an in-memory ranked/unranked queue. It widens the search window
+// over time, so matching is re-evaluated on a timer and not only on join.
 type Queue struct {
 	mu      sync.Mutex
 	tickets map[string]*ticket
 	byUser  map[string]string
+	notify  Notifier
+	now     func() time.Time
+	stop    chan struct{}
+	done    chan struct{}
 }
 
-func New() *Queue { return &Queue{tickets: map[string]*ticket{}, byUser: map[string]string{}} }
+func New(notify Notifier) *Queue {
+	if notify == nil {
+		notify = func(string, model.MatchmakingStatus) {}
+	}
+	return &Queue{tickets: map[string]*ticket{}, byUser: map[string]string{}, notify: notify, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// Start runs the periodic matching pass until Stop is called.
+func (queue *Queue) Start(interval time.Duration) {
+	queue.mu.Lock()
+	if queue.stop != nil {
+		queue.mu.Unlock()
+		return
+	}
+	queue.stop = make(chan struct{})
+	queue.done = make(chan struct{})
+	stop, done := queue.stop, queue.done
+	queue.mu.Unlock()
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				queue.Tick()
+			case <-stop:
+				return
+			}
+		}
+	}()
+}
+
+func (queue *Queue) Stop() {
+	queue.mu.Lock()
+	stop, done := queue.stop, queue.done
+	queue.stop, queue.done = nil, nil
+	queue.mu.Unlock()
+	if stop == nil {
+		return
+	}
+	close(stop)
+	<-done
+}
+
+// Tick re-runs matching for every mode and pushes the statuses that changed.
+func (queue *Queue) Tick() {
+	queue.mu.Lock()
+	for _, mode := range []string{"ranked", "unranked"} {
+		queue.tryMatch(mode)
+	}
+	updates := queue.collectChangesLocked()
+	queue.mu.Unlock()
+	queue.dispatch(updates)
+}
 
 func (queue *Queue) Join(userID, mode string, elo int) model.MatchmakingStatus {
 	queue.mu.Lock()
-	defer queue.mu.Unlock()
 	if oldID, ok := queue.byUser[userID]; ok {
 		delete(queue.tickets, oldID)
 	}
-	now := time.Now().UTC()
-	entry := &ticket{id: uuid.NewString(), userID: userID, mode: mode, elo: elo, createdAt: now}
+	entry := &ticket{id: uuid.NewString(), userID: userID, mode: mode, elo: elo, createdAt: queue.now()}
 	queue.tickets[entry.id] = entry
 	queue.byUser[userID] = entry.id
 	queue.tryMatch(mode)
-	return queue.statusLocked(userID)
+	status := queue.statusLocked(userID)
+	entry.lastSent = fingerprintOf(status)
+	entry.announced = true
+	updates := queue.collectChangesLocked()
+	queue.mu.Unlock()
+	queue.dispatch(updates)
+	return status
 }
 
 func (queue *Queue) Leave(userID string) {
 	queue.mu.Lock()
-	defer queue.mu.Unlock()
-	queue.removeLocked(userID)
+	removed := queue.removeLocked(userID)
+	updates := queue.collectChangesLocked()
+	if removed {
+		updates = append(updates, update{userID: userID, status: notWaiting()})
+	}
+	queue.mu.Unlock()
+	queue.dispatch(updates)
 }
 
 func (queue *Queue) Status(userID string) model.MatchmakingStatus {
@@ -55,11 +134,48 @@ func (queue *Queue) Status(userID string) model.MatchmakingStatus {
 	return queue.statusLocked(userID)
 }
 
-func (queue *Queue) removeLocked(userID string) {
-	if id, ok := queue.byUser[userID]; ok {
-		delete(queue.tickets, id)
-		delete(queue.byUser, userID)
+type update struct {
+	userID string
+	status model.MatchmakingStatus
+}
+
+func (queue *Queue) dispatch(updates []update) {
+	for _, item := range updates {
+		queue.notify(item.userID, item.status)
 	}
+}
+
+func (queue *Queue) collectChangesLocked() []update {
+	updates := make([]update, 0)
+	for _, entry := range queue.tickets {
+		status := queue.statusLocked(entry.userID)
+		current := fingerprintOf(status)
+		if entry.announced && current == entry.lastSent {
+			continue
+		}
+		entry.lastSent = current
+		entry.announced = true
+		updates = append(updates, update{userID: entry.userID, status: status})
+	}
+	return updates
+}
+
+func fingerprintOf(status model.MatchmakingStatus) fingerprint {
+	gap := 0
+	if status.SearchEloGap != nil {
+		gap = *status.SearchEloGap
+	}
+	return fingerprint{matched: status.Matched, position: status.Position, queueSize: status.QueueSize, gap: gap}
+}
+
+func (queue *Queue) removeLocked(userID string) bool {
+	id, ok := queue.byUser[userID]
+	if !ok {
+		return false
+	}
+	delete(queue.tickets, id)
+	delete(queue.byUser, userID)
+	return true
 }
 
 func (queue *Queue) tryMatch(mode string) {
@@ -70,44 +186,48 @@ func (queue *Queue) tryMatch(mode string) {
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].createdAt.Before(entries[j].createdAt) })
+	now := queue.now()
 	for len(entries) >= 2 {
 		base := entries[0]
-		gap := searchGap(time.Since(base.createdAt))
+		gap := searchGap(now.Sub(base.createdAt))
 		match := []*ticket{base}
+		rest := make([]*ticket, 0, len(entries))
 		for _, candidate := range entries[1:] {
-			if len(match) >= 4 {
-				break
-			}
-			if abs(base.elo-candidate.elo) <= gap {
+			if len(match) < 4 && abs(base.elo-candidate.elo) <= gap {
 				match = append(match, candidate)
+				continue
 			}
+			rest = append(rest, candidate)
 		}
 		if len(match) < 2 {
 			return
 		}
-		matchedAt := time.Now().UTC()
 		players := make([]ticket, len(match))
 		for i, item := range match {
 			players[i] = *item
 		}
 		for _, item := range match {
-			item.matchedAt = matchedAt
+			item.matchedAt = now
 			item.players = players
 		}
-		entries = entries[len(match):]
+		entries = rest
 	}
+}
+
+func notWaiting() model.MatchmakingStatus {
+	return model.MatchmakingStatus{Status: "not_waiting", Players: []model.MatchmakingPlayer{}}
 }
 
 func (queue *Queue) statusLocked(userID string) model.MatchmakingStatus {
 	id, ok := queue.byUser[userID]
 	if !ok {
-		return model.MatchmakingStatus{Status: "not_waiting", Players: []model.MatchmakingPlayer{}}
+		return notWaiting()
 	}
 	entry := queue.tickets[id]
 	if entry == nil {
-		return model.MatchmakingStatus{Status: "not_waiting", Players: []model.MatchmakingPlayer{}}
+		return notWaiting()
 	}
-	waited := int64(time.Since(entry.createdAt).Seconds())
+	waited := int64(queue.now().Sub(entry.createdAt).Seconds())
 	if waited < 0 {
 		waited = 0
 	}
@@ -145,6 +265,7 @@ func (queue *Queue) sizeMode(mode string) int {
 	}
 	return count
 }
+
 func (queue *Queue) position(entry *ticket) int {
 	position := 1
 	for _, candidate := range queue.tickets {
@@ -154,6 +275,7 @@ func (queue *Queue) position(entry *ticket) int {
 	}
 	return position
 }
+
 func searchGap(waited time.Duration) int {
 	gap := 200 + int(waited/(5*time.Second))*75
 	if gap > 800 {
@@ -161,10 +283,10 @@ func searchGap(waited time.Duration) int {
 	}
 	return gap
 }
+
 func abs(value int) int {
 	if value < 0 {
 		return -value
 	}
 	return value
 }
-func intPtr(value int) *int { return &value }

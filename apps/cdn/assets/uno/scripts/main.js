@@ -10,32 +10,94 @@ import { createCardTrail } from './card_trail.js';
 
 const query = new URLSearchParams(window.location.search);
 const gameID = query.get('gameId')?.trim() || '';
-const viewerID = query.get('playerId')?.trim() || '';
 const spectatorMode = query.get('spectate') === '1';
-const networkMode = Boolean(gameID);
+const networkMode = Boolean(gameID) && window.parent !== window;
 const roundTable = query.has('seats');
 const seatCount = THREE.MathUtils.clamp(Number(query.get('seats')) || 4, 1, 8);
 const startingHandSize = THREE.MathUtils.clamp(Number(query.get('hand')) || 7, 3, 14);
 const tableRadius = 1.15 + Math.max(0, seatCount - 4) * 0.035;
 
-async function requestGame(path, options = {}) {
-    const token = sessionStorage.getItem('card-arena.access-token');
-    const headers = new Headers(options.headers || {});
-    headers.set('Accept', 'application/json');
-    if (token) headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch(`/api/v1/games/${encodeURIComponent(gameID)}/uno/${path}`, { ...options, headers });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.message || `UNO request failed (${response.status})`);
-    return payload;
+function createNotice() {
+    const element = document.querySelector('.notice');
+    let timer = 0;
+    return {
+        show(text) {
+            if (!element) return;
+            element.textContent = text;
+            element.classList.add('is-visible');
+            window.clearTimeout(timer);
+            timer = window.setTimeout(() => element.classList.remove('is-visible'), 2600);
+        },
+    };
 }
 
+function createParentBridge() {
+    const origin = window.location.origin;
+    const pending = new Map();
+    const handlers = { bootstrap: null, state: null };
+    let nextID = 1;
+    const post = (message) => window.parent.postMessage(message, origin);
+    window.addEventListener('message', (event) => {
+        if (event.origin !== origin || event.source !== window.parent) return;
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        if (data.type === 'uno.bootstrap') handlers.bootstrap?.(data);
+        else if (data.type === 'uno.state') handlers.state?.(data.snapshot);
+        else if (data.type === 'uno.action.result') {
+            const request = pending.get(data.id);
+            if (!request) return;
+            pending.delete(data.id);
+            if (data.ok) request.resolve();
+            else request.reject(new Error(data.message || 'The table refused this move.'));
+        }
+    });
+    return {
+        bootstrap() {
+            return new Promise((resolve) => {
+                const timer = window.setInterval(() => post({ type: 'uno.ready' }), 500);
+                handlers.bootstrap = (data) => {
+                    handlers.bootstrap = null;
+                    window.clearInterval(timer);
+                    resolve(data);
+                };
+                post({ type: 'uno.ready' });
+            });
+        },
+        firstState() {
+            return new Promise((resolve) => {
+                const previous = handlers.state;
+                handlers.state = (snapshot) => {
+                    handlers.state = previous;
+                    previous?.(snapshot);
+                    resolve(snapshot);
+                };
+            });
+        },
+        onState(callback) {
+            handlers.state = callback;
+        },
+        action(action) {
+            return new Promise((resolve, reject) => {
+                const id = nextID++;
+                pending.set(id, { resolve, reject });
+                post({ type: 'uno.action', id, action });
+                window.setTimeout(() => {
+                    if (pending.delete(id)) reject(new Error('The table did not answer in time.'));
+                }, 15000);
+            });
+        },
+    };
+}
+
+const notice = createNotice();
+const bridge = networkMode ? createParentBridge() : null;
 let initialUnoState = null;
-if (networkMode) {
-    try {
-        initialUnoState = await requestGame('state');
-    } catch (error) {
-        console.error(error);
-    }
+let viewerID = query.get('playerId')?.trim() || '';
+if (bridge) {
+    const bootstrap = await bridge.bootstrap();
+    viewerID = bootstrap.player?.id || viewerID;
+    initialUnoState = bootstrap.snapshot || null;
+    if (!initialUnoState && !spectatorMode) initialUnoState = await bridge.firstState();
 }
 
 async function addRoundTable(scene, count) {
@@ -66,7 +128,6 @@ async function addRoundTable(scene, count) {
     scene.add(table);
 
     const chairTemplate = prepareModel(chairGLB.scene);
-    chairTemplate.setScalar
     for (let id = 0; id < count; id++) {
         const angle = (id / count) * Math.PI * 2;
         const chair = chairTemplate.clone(true);
@@ -151,18 +212,12 @@ const cardEffects = {};
 let cardsControl;
 let actionBusy = false;
 const requestUnoAction = async (action) => {
-    if (actionBusy || !networkMode) return;
+    if (actionBusy || !bridge) return;
     actionBusy = true;
     try {
-        const next = await requestGame(action.type === 'draw' ? 'draw' : 'play', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: action.type === 'draw' ? undefined : JSON.stringify({ cardIndex: action.cardIndex, color: action.color || '' }),
-        });
-        cardsControl.applyServerState(next);
-        syncHeads(next);
+        await bridge.action(action.type === 'draw' ? { type: 'draw' } : { type: 'play', cardIndex: action.cardIndex, color: action.color || null });
     } catch (error) {
-        console.error(error);
+        notice.show(error.message);
     } finally {
         actionBusy = false;
     }
@@ -287,17 +342,10 @@ if (initialUnoState) {
     syncHeads(initialUnoState);
 }
 
-if (networkMode) {
-    window.setInterval(async () => {
-        try {
-            const next = await requestGame('state');
-            cardsControl.applyServerState(next);
-            syncHeads(next);
-        } catch (error) {
-            console.error(error);
-        }
-    }, 1200);
-}
+bridge?.onState((snapshot) => {
+    cardsControl.applyServerState(snapshot);
+    syncHeads(snapshot);
+});
 
 let shaderOn = true;
 window.addEventListener('keydown', (event) => {

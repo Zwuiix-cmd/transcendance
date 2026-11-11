@@ -16,17 +16,10 @@ export class ApiClientError extends Error {
 
 class ApiClient {
   private token: string | null = null
-  private readonly cache = new Map<string, { expiresAt: number; value: unknown }>()
   private readonly inFlight = new Map<string, Promise<unknown>>()
-  private readonly cacheTtlMs = 3000
 
   setToken(token: string | null) {
-    if (this.token !== token) this.clearCache()
     this.token = token
-  }
-
-  private clearCache() {
-    this.cache.clear()
   }
 
   async register(username: string, email: string, password: string) {
@@ -106,9 +99,8 @@ class ApiClient {
     await this.request<void>('/matchmaking/queue', { method: 'DELETE' })
   }
 
-  getGame(id: string, fresh = false) {
-    const suffix = fresh ? `?live=${Date.now()}` : ''
-    return this.request<GameDetail>(`/games/${encodeURIComponent(id)}${suffix}`)
+  getGame(id: string) {
+    return this.request<GameDetail>(`/games/${encodeURIComponent(id)}`)
   }
 
   updateGameStatus(id: string, status: Extract<Game['status'], 'waiting' | 'in_progress'>) {
@@ -147,13 +139,6 @@ class ApiClient {
 
   async leaveSpectating(id: string) {
     await this.request<void>(`/games/${encodeURIComponent(id)}/spectate`, { method: 'DELETE' })
-  }
-
-  async updateGamePresence(id: string, role: 'player' | 'spectator') {
-    await this.request<void>(`/games/${encodeURIComponent(id)}/presence`, {
-      method: 'POST',
-      body: JSON.stringify({ role }),
-    })
   }
 
   getPublicProfile(id: string) {
@@ -215,30 +200,16 @@ class ApiClient {
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const method = (init.method ?? 'GET').toUpperCase()
-    const isGet = method === 'GET'
-    const cacheKey = `${this.token ?? 'anonymous'}:${path}`
-    if (isGet) {
-      const cached = this.cache.get(cacheKey)
-      if (cached && cached.expiresAt > Date.now()) return cached.value as T
-      if (cached) this.cache.delete(cacheKey)
-      const pending = this.inFlight.get(cacheKey)
-      if (pending) return pending as Promise<T>
-    }
-
+    if (method !== 'GET') return this.execute<T>(path, init)
+    const key = `${this.token ?? 'anonymous'}:${path}`
+    const pending = this.inFlight.get(key)
+    if (pending) return pending as Promise<T>
     const request = this.execute<T>(path, init)
-    if (!isGet) {
-      const value = await request
-      this.clearCache()
-      return value
-    }
-
-    this.inFlight.set(cacheKey, request)
+    this.inFlight.set(key, request)
     try {
-      const value = await request
-      this.cache.set(cacheKey, { expiresAt: Date.now() + this.cacheTtlMs, value })
-      return value
+      return await request
     } finally {
-      this.inFlight.delete(cacheKey)
+      this.inFlight.delete(key)
     }
   }
 

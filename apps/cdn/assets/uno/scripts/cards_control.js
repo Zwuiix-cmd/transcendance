@@ -206,11 +206,13 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
         if (!hand) return Promise.resolve();
         return Promise.all(hand.flatMap((card, i) => {
             const position = (i - (hand.length - 1) / 2) * 0.11 / (hand.length / 7 + 1);
-            const angle = (id / seatCount) * Math.PI * 2;
+            const relativeSeat = (id - myPlayer + seatCount) % seatCount;
+            const angle = (relativeSeat / seatCount) * Math.PI * 2;
             const radialX = Math.sin(angle);
             const radialZ = Math.cos(angle);
             const tangentX = Math.cos(angle);
             const tangentZ = -Math.sin(angle);
+
             const handRadius = tableRadius * (id === myPlayer ? 0.68 : 0.72);
             const x = roundTable ? radialX * handRadius + tangentX * position : [position, -0.47, position, 0.47][id];
             const z = roundTable ? radialZ * handRadius + tangentZ * position : [0.47, position, -0.47, position][id];

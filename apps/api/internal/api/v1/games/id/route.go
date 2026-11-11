@@ -7,7 +7,6 @@ import (
 
 	route "card-arena/api/internal/api/route"
 	gamesdependencies "card-arena/api/internal/api/v1/games/dependencies"
-	"card-arena/api/internal/model"
 )
 
 type GetRoute struct {
@@ -19,8 +18,7 @@ func HandleGet(context *route.Context) {
 	if !ok {
 		return
 	}
-	id := context.Param("id")
-	game, err := gamesdependencies.FetchGame(server.Database(), id, userID)
+	detail, err := gamesdependencies.FetchGameDetail(server.Database(), context.Param("id"), userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			gamesdependencies.WriteError(context.Writer, http.StatusNotFound, "game_not_found", "Lobby was not found")
@@ -29,68 +27,7 @@ func HandleGet(context *route.Context) {
 		}
 		return
 	}
-	participantsRows, err := server.Database().Query(`SELECT p.user_id,u.username,CASE WHEN g.created_by=p.user_id THEN 1 ELSE 0 END FROM game_participants p JOIN users u ON u.id=p.user_id JOIN games g ON g.id=p.game_id WHERE p.game_id=? ORDER BY CASE WHEN g.created_by=p.user_id THEN 0 ELSE 1 END ASC,u.username ASC`, id)
-	if err != nil {
-		gamesdependencies.WriteDatabaseError(context.Writer, err)
-		return
-	}
-	defer participantsRows.Close()
-	participants := []model.LobbyParticipant{}
-	for participantsRows.Next() {
-		var participant model.LobbyParticipant
-		var host int
-		if err := participantsRows.Scan(&participant.UserID, &participant.Username, &host); err != nil {
-			gamesdependencies.WriteDatabaseError(context.Writer, err)
-			return
-		}
-		participant.Host = host != 0
-		participants = append(participants, participant)
-	}
-	if err := participantsRows.Err(); err != nil {
-		gamesdependencies.WriteDatabaseError(context.Writer, err)
-		return
-	}
-	spectatorRows, err := server.Database().Query(`SELECT s.user_id,u.username FROM game_spectators s JOIN users u ON u.id=s.user_id WHERE s.game_id=? ORDER BY u.username ASC`, id)
-	if err != nil {
-		gamesdependencies.WriteDatabaseError(context.Writer, err)
-		return
-	}
-	defer spectatorRows.Close()
-	spectators := []model.LobbySpectator{}
-	for spectatorRows.Next() {
-		var spectator model.LobbySpectator
-		if err := spectatorRows.Scan(&spectator.UserID, &spectator.Username); err != nil {
-			gamesdependencies.WriteDatabaseError(context.Writer, err)
-			return
-		}
-		spectators = append(spectators, spectator)
-	}
-	if err := spectatorRows.Err(); err != nil {
-		gamesdependencies.WriteDatabaseError(context.Writer, err)
-		return
-	}
-	whitelist := []model.WhitelistEntry{}
-	if game.CreatedBy.Valid && game.CreatedBy.String == userID {
-		rows, queryErr := server.Database().Query(`SELECT w.user_id,u.username FROM game_whitelist w JOIN users u ON u.id=w.user_id WHERE w.game_id=? ORDER BY u.username ASC`, id)
-		if queryErr != nil {
-			gamesdependencies.WriteDatabaseError(context.Writer, queryErr)
-			return
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var item model.WhitelistEntry
-			if err := rows.Scan(&item.UserID, &item.Username); err != nil {
-				gamesdependencies.WriteDatabaseError(context.Writer, err)
-				return
-			}
-			whitelist = append(whitelist, item)
-		}
-		if err := rows.Err(); err != nil {
-			gamesdependencies.WriteDatabaseError(context.Writer, err)
-			return
-		}
-	}
-	gamesdependencies.WriteJSON(context.Writer, http.StatusOK, model.GameDetail{Game: gamesdependencies.GameResponse(game, userID), Participants: participants, Spectators: spectators, Whitelist: whitelist})
+	gamesdependencies.WriteJSON(context.Writer, http.StatusOK, detail)
 }
 
 func (GetRoute) Handler() route.Handler {
@@ -130,6 +67,9 @@ func HandleDelete(context *route.Context) {
 		gamesdependencies.WriteError(context.Writer, http.StatusNotFound, "game_not_found", "Game was not found or is not owned by you")
 		return
 	}
+	notifier := gamesdependencies.Notify(context)
+	notifier.PublishGameDeleted(id)
+	notifier.PublishLobbies()
 	context.Writer.WriteHeader(http.StatusNoContent)
 }
 
