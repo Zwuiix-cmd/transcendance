@@ -160,11 +160,14 @@ func (server *Server) serveHTTP(writer http.ResponseWriter, request *http.Reques
 
 	clientKey := server.clientKey(request)
 	if !server.validAPIKey(request.Header.Get("X-API-Key")) {
-		allowed, retry := server.allowRate(request, "invalid:"+clientKey, server.cfg.InvalidRequestsPerMinute)
-		if !allowed {
-			writer.Header().Set("Retry-After", strconv.Itoa(retry))
-			writeError(writer, http.StatusTooManyRequests, "rate_limited", "Too many invalid API requests")
-			return
+		if server.cfg.Environment != "development"{
+
+			allowed, retry := server.allowRate(request, "invalid:"+clientKey, server.cfg.InvalidRequestsPerMinute)
+			if !allowed {
+				writer.Header().Set("Retry-After", strconv.Itoa(retry))
+				writeError(writer, http.StatusTooManyRequests, "rate_limited", "Too many invalid API requests")
+				return
+			}
 		}
 		writeError(writer, http.StatusUnauthorized, "invalid_api_key", "A valid API key is required")
 		server.recordAudit("", "", "security.invalid_api_key", "security", request.URL.Path, request.Method+" "+request.URL.Path+" -> 401", "warning", clientKey, request.UserAgent())
@@ -176,10 +179,13 @@ func (server *Server) serveHTTP(writer http.ResponseWriter, request *http.Reques
 		limit = server.cfg.AdminRequestsPerMinute
 	}
 	allowed, retry := server.allowRate(request, "valid:"+clientKey, limit)
-	if !allowed {
-		writer.Header().Set("Retry-After", strconv.Itoa(retry))
-		writeError(writer, http.StatusTooManyRequests, "rate_limited", "Too many requests")
-		return
+
+	if server.cfg.Environment != "development" {
+		if !allowed {
+			writer.Header().Set("Retry-After", strconv.Itoa(retry))
+			writeError(writer, http.StatusTooManyRequests, "rate_limited", "Too many requests")
+			return
+		}
 	}
 
 	request, actor := server.cacheAuthentication(request)
