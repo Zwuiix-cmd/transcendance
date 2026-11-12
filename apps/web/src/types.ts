@@ -119,6 +119,17 @@ export type UnoPlayerState = {
   hand?: string[]
 }
 
+export type PlayerResult = {
+  rank: number
+  playerId: string
+  name: string
+  bot: boolean
+  winner: boolean
+  cardsRemaining: number
+  handPoints: number
+  pointsEarned: number
+}
+
 export type UnoSnapshot = {
   gameId: string
   status: 'active' | 'finished'
@@ -129,7 +140,11 @@ export type UnoSnapshot = {
   topCard: string
   drawCount: number
   players: UnoPlayerState[]
+
   winnerId?: string
+  winnerScore: number
+  results?: PlayerResult[]
+
   lastAction: string
 }
 

@@ -15,6 +15,7 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage').then((module) => ({
 const AccountPage = lazy(() => import('./pages/AccountPage').then((module) => ({ default: module.AccountPage })))
 const PublicProfilePage = lazy(() => import('./pages/PublicProfilePage').then((module) => ({ default: module.PublicProfilePage })))
 const UnoGamePage = lazy(() => import('./pages/UnoGamePage').then((module) => ({ default: module.UnoGamePage })))
+const UnoResultsPage = lazy(() => import('./pages/UnoResultsPage').then((module) => ({ default: module.UnoResultsPage })))
 
 function RouteLoading() {
   return <main className="main-content route-loading"><LoadingState label="Loading page" /></main>
@@ -48,6 +49,7 @@ export default function App() {
       <Route path="/" element={<HomeRedirect />} />
       <Route path="/:kind" element={<LegalPage />} />
       <Route path="/uno" element={<UnoGamePage />} />
+      <Route path="/uno/results" element={<UnoResultsPage />} />
       <Route element={<AuthModalProvider><MatchmakingProvider><AppShell /></MatchmakingProvider></AuthModalProvider>}>
         <Route path="/login" element={<AuthRedirect mode="login" />} />
         <Route path="/register" element={<AuthRedirect mode="register" />} />

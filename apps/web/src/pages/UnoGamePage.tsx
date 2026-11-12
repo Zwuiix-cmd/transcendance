@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiClientError, api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { LoadingState, UserAvatar } from '../components/ui'
@@ -60,6 +60,7 @@ async function fetchSnapshot(gameID: string) {
 
 export function UnoGamePage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const { user, loading: authLoading } = useAuth()
   const frameRef = useRef<HTMLIFrameElement>(null)
   const gameID = searchParams.get('game')?.trim() ?? ''
@@ -121,6 +122,17 @@ export function UnoGamePage() {
     }
   })
   useRealtimeResync(() => { if (accessGranted) void enter(false) })
+  
+ useEffect(() => {
+    if (unoState?.status === 'finished' && unoState.results) {
+      navigate('/uno/results', {
+        replace: true,
+        state: {
+          results: unoState.results,
+        },
+      })
+    }
+  }, [unoState, navigate])
 
   const postToFrame = useCallback((message: Record<string, unknown>) => {
     frameRef.current?.contentWindow?.postMessage(message, window.location.origin)

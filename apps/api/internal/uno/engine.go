@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,19 +50,32 @@ type player struct {
 }
 
 type gameState struct {
-	GameID       string   `json:"gameId"`
-	Status       string   `json:"status"`
-	Version      int64    `json:"version"`
-	TurnPlayerID string   `json:"turnPlayerId"`
-	TurnNumber   int      `json:"turnNumber"`
-	Direction    int      `json:"direction"`
-	CurrentColor string   `json:"currentColor"`
-	DrawPile     []card   `json:"drawPile"`
-	DiscardPile  []card   `json:"discardPile"`
-	Players      []player `json:"players"`
-	WinnerID     string   `json:"winnerId,omitempty"`
-	LastAction   string   `json:"lastAction"`
-	UpdatedAt    string   `json:"updatedAt"`
+	GameID       string         `json:"gameId"`
+	Status       string         `json:"status"`
+	Version      int64          `json:"version"`
+	TurnPlayerID string         `json:"turnPlayerId"`
+	TurnNumber   int            `json:"turnNumber"`
+	Direction    int            `json:"direction"`
+	CurrentColor string         `json:"currentColor"`
+	DrawPile     []card         `json:"drawPile"`
+	DiscardPile  []card         `json:"discardPile"`
+	Players      []player       `json:"players"`
+	WinnerID     string         `json:"winnerId,omitempty"`
+	WinnerScore  int            `json:"winnerScore"`
+	Results      []PlayerResult `json:"results,omitempty"`
+	LastAction   string         `json:"lastAction"`
+	UpdatedAt    string         `json:"updatedAt"`
+}
+
+type PlayerResult struct {
+	Rank           int    `json:"rank"`
+	PlayerID       string `json:"playerId"`
+	Name           string `json:"name"`
+	Bot            bool   `json:"bot"`
+	Winner         bool   `json:"winner"`
+	CardsRemaining int    `json:"cardsRemaining"`
+	HandPoints     int    `json:"handPoints"`
+	PointsEarned   int    `json:"pointsEarned"`
 }
 
 type PublicPlayer struct {
@@ -83,6 +98,8 @@ type Snapshot struct {
 	DrawCount    int            `json:"drawCount"`
 	Players      []PublicPlayer `json:"players"`
 	WinnerID     string         `json:"winnerId,omitempty"`
+	WinnerScore  int            `json:"winnerScore"`
+	Results      []PlayerResult `json:"results,omitempty"`
 	LastAction   string         `json:"lastAction"`
 }
 
@@ -166,7 +183,7 @@ func (engine *Engine) Draw(gameID, userID string) (Snapshot, error) {
 		state.Players[playerIndex].Hand = append(state.Players[playerIndex].Hand, state.DrawPile[len(state.DrawPile)-1])
 		state.DrawPile = state.DrawPile[:len(state.DrawPile)-1]
 		state.LastAction = "draw"
-		engine.advance(state, playerIndex)
+		engine.advance(state, playerIndex, 1)
 		return nil
 	})
 }
@@ -177,10 +194,12 @@ func (engine *Engine) Play(gameID, userID string, cardIndex int, color string) (
 		if cardIndex < 0 || cardIndex >= len(hand) {
 			return fmt.Errorf("%w: card index is out of range", ErrInvalidCard)
 		}
+
 		played := hand[cardIndex]
-		if !canPlay(played.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
+		if len(state.DiscardPile) == 0 || !canPlay(played.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
 			return fmt.Errorf("%w: card does not match the active color or symbol", ErrInvalidCard)
 		}
+
 		if isWild(played.Face) {
 			color = strings.ToUpper(strings.TrimSpace(color))
 			if color != "R" && color != "G" && color != "B" && color != "Y" {
@@ -190,18 +209,167 @@ func (engine *Engine) Play(gameID, userID string, cardIndex int, color string) (
 		} else {
 			state.CurrentColor = colorOf(played.Face)
 		}
+
 		state.Players[playerIndex].Hand = append(hand[:cardIndex], hand[cardIndex+1:]...)
 		state.DiscardPile = append(state.DiscardPile, played)
 		state.LastAction = "play"
+
 		if len(state.Players[playerIndex].Hand) == 0 {
 			state.Status = "finished"
 			state.WinnerID = userID
 			state.Players[playerIndex].Finished = true
+			state.Results = calculateResults(state, playerIndex)
+			state.WinnerScore = state.Results[0].PointsEarned
 			return nil
 		}
-		engine.advance(state, playerIndex)
+
+		steps, err := engine.applyCardEffect(state, playerIndex, played)
+		if err != nil {
+			return err
+		}
+		engine.advance(state, playerIndex, steps)
 		return nil
 	})
+}
+
+func calculateResults(state *gameState, winnerIndex int) []PlayerResult {
+	results := make([]PlayerResult, 0, len(state.Players))
+	totalWinnerPoints := 0
+
+	for index, current := range state.Players {
+		handPoints := calculateHandPoints(current.Hand)
+		if index != winnerIndex {
+			totalWinnerPoints += handPoints
+		}
+		results = append(results, PlayerResult{
+			PlayerID:       current.ID,
+			Name:           current.Name,
+			Bot:            current.Bot,
+			Winner:         index == winnerIndex,
+			CardsRemaining: len(current.Hand),
+			HandPoints:     handPoints,
+		})
+	}
+
+	sort.SliceStable(results, func(i, j int) bool {
+		if results[i].Winner != results[j].Winner {
+			return results[i].Winner
+		}
+		return results[i].HandPoints < results[j].HandPoints
+	})
+
+	for index := range results {
+		results[index].Rank = index + 1
+		if results[index].Winner {
+			results[index].PointsEarned = totalWinnerPoints
+		}
+	}
+	return results
+}
+
+func calculateHandPoints(hand []card) int {
+	total := 0
+	for _, remainingCard := range hand {
+		face := remainingCard.Face
+		switch {
+		case isWild(face):
+			total += 50
+		case symbolOf(face) == "A2" || symbolOf(face) == "R" || symbolOf(face) == "S":
+			total += 20
+		default:
+			value, err := strconv.Atoi(symbolOf(face))
+			if err == nil {
+				total += value
+			}
+		}
+	}
+	return total
+}
+
+func (engine *Engine) applyCardEffect(state *gameState, playerIndex int, played card) (int, error) {
+	switch played.Face {
+	case "WC":
+		return 1, nil
+
+	case "W4":
+		target, ok := engine.nextPlayerIndex(state, playerIndex)
+		if !ok {
+			return 0, fmt.Errorf("%w: there is no next player", ErrInvalidAction)
+		}
+		if err := engine.drawCards(state, target, 4); err != nil {
+			return 0, err
+		}
+		return 2, nil
+
+	default:
+		switch symbolOf(played.Face) {
+		case "A2":
+			target, ok := engine.nextPlayerIndex(state, playerIndex)
+			if !ok {
+				return 0, fmt.Errorf("%w: there is no next player", ErrInvalidAction)
+			}
+			if err := engine.drawCards(state, target, 2); err != nil {
+				return 0, err
+			}
+			return 2, nil
+
+		case "S":
+			return 2, nil
+
+		case "R":
+			state.Direction *= -1
+			if len(activePlayers(state)) == 2 {
+				return 2, nil
+			}
+			return 1, nil
+		}
+	}
+
+	return 1, nil
+}
+
+func (engine *Engine) drawCards(state *gameState, targetIndex, count int) error {
+	for i := 0; i < count; i++ {
+		if len(state.DrawPile) == 0 {
+			engine.recycle(state)
+		}
+		if len(state.DrawPile) == 0 {
+			return fmt.Errorf("%w: not enough cards to apply the penalty", ErrInvalidAction)
+		}
+
+		last := len(state.DrawPile) - 1
+		state.Players[targetIndex].Hand = append(state.Players[targetIndex].Hand, state.DrawPile[last])
+		state.DrawPile = state.DrawPile[:last]
+	}
+	return nil
+}
+
+func (engine *Engine) nextPlayerIndex(state *gameState, current int) (int, bool) {
+	count := len(state.Players)
+	if count < 2 {
+		return 0, false
+	}
+
+	for step := 1; step < count; step++ {
+		next := (current + state.Direction*step) % count
+		if next < 0 {
+			next += count
+		}
+		if !state.Players[next].Finished {
+			return next, true
+		}
+	}
+	return 0, false
+}
+
+func activePlayers(state *gameState) []int {
+	var active []int
+	for index := range state.Players {
+		if !state.Players[index].Finished {
+			active = append(active, index)
+		}
+	}
+	return active
 }
 
 func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int) error) (Snapshot, error) {
@@ -363,22 +531,26 @@ func (engine *Engine) recycle(state *gameState) {
 	state.DiscardPile = []card{top}
 }
 
-func (engine *Engine) advance(state *gameState, current int) {
-	for step := 1; step <= len(state.Players); step++ {
-		next := (current + state.Direction*step) % len(state.Players)
-		if next < 0 {
-			next += len(state.Players)
-		}
-		if !state.Players[next].Finished {
-			state.TurnPlayerID = state.Players[next].ID
+func (engine *Engine) advance(state *gameState, current, steps int) {
+	if steps < 1 {
+		steps = 1
+	}
+
+	next := current
+	for step := 0; step < steps; step++ {
+		var ok bool
+		next, ok = engine.nextPlayerIndex(state, next)
+		if !ok {
+			state.Status = "finished"
 			return
 		}
 	}
-	state.Status = "finished"
+
+	state.TurnPlayerID = state.Players[next].ID
 }
 
 func publicSnapshot(state *gameState, viewerID string) Snapshot {
-	snapshot := Snapshot{GameID: state.GameID, Status: state.Status, Version: state.Version, TurnPlayerID: state.TurnPlayerID, TurnNumber: state.TurnNumber, CurrentColor: state.CurrentColor, DrawCount: len(state.DrawPile), LastAction: state.LastAction, WinnerID: state.WinnerID}
+	snapshot := Snapshot{GameID: state.GameID, Status: state.Status, Version: state.Version, TurnPlayerID: state.TurnPlayerID, TurnNumber: state.TurnNumber, CurrentColor: state.CurrentColor, DrawCount: len(state.DrawPile), LastAction: state.LastAction, WinnerID: state.WinnerID, WinnerScore: state.WinnerScore, Results: append([]PlayerResult(nil), state.Results...)}
 	if len(state.DiscardPile) > 0 {
 		snapshot.TopCard = state.DiscardPile[len(state.DiscardPile)-1].Face
 	}
