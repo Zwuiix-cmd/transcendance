@@ -146,6 +146,8 @@ export type UnoSnapshot = {
   results?: PlayerResult[]
 
   lastAction: string
+  pendingDraw?: number
+  canChallenge?: boolean
 }
 
 export type LobbySpectator = {
@@ -276,3 +278,4 @@ export type GameDeletedEvent = {
 export type UnoActionRequest =
   | { type: 'draw' }
   | { type: 'play'; cardIndex: number; color: string | null }
+  | { type: 'challenge' }

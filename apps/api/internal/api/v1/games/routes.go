@@ -18,6 +18,7 @@ import (
 	"card-arena/api/internal/api/v1/games/id/whitelist"
 	"card-arena/api/internal/api/v1/games/id/whitelist/user-id"
 	"card-arena/api/internal/api/v1/games/join"
+	"card-arena/api/internal/api/v1/games/id/uno/challenge"
 )
 
 func Definitions() []route.RegisteredRoute {
@@ -34,6 +35,7 @@ func Definitions() []route.RegisteredRoute {
 		state.Definition,
 		start.Definition,
 		draw.Definition,
+		challenge.Definition,
 		play.Definition,
 		rotate.Definition,
 		whitelist.Definition,

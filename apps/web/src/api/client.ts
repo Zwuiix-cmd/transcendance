@@ -129,6 +129,10 @@ class ApiClient {
     })
   }
 
+  challengeUnoDrawFour(id: string) {
+    return this.request<UnoSnapshot>(`/games/${encodeURIComponent(id)}/uno/challenge`, { method: 'POST' })
+  }
+
   reconnectGame(id: string) {
     return this.request<Game>(`/games/${encodeURIComponent(id)}/reconnect`, { method: 'POST' })
   }

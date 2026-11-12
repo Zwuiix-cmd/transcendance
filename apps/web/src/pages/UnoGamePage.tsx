@@ -70,6 +70,8 @@ export function UnoGamePage() {
   const [loading, setLoading] = useState(Boolean(gameID))
   const [error, setError] = useState('')
   const [accessGranted, setAccessGranted] = useState(!gameID)
+  const [challengePending, setChallengePending] = useState(false)
+  const [challengeError, setChallengeError] = useState('')
   const latest = useRef({ game, unoState, user })
   latest.current = { game, unoState, user }
 
@@ -138,9 +140,30 @@ export function UnoGamePage() {
     frameRef.current?.contentWindow?.postMessage(message, window.location.origin)
   }, [])
 
+  const canChallenge = Boolean(
+    !spectatorMode &&
+    unoState?.status === 'active' &&
+    unoState.canChallenge &&
+    unoState.turnPlayerId === user?.id,
+  )
+
+  const challengeDrawFour = useCallback(async () => {
+    if (!canChallenge || challengePending) return
+    setChallengePending(true)
+    setChallengeError('')
+    try {
+      const snapshot = await api.challengeUnoDrawFour(gameID)
+      applySnapshot(snapshot)
+    } catch (requestError) {
+      setChallengeError(requestErrorMessage(requestError, 'Unable to challenge this +4.'))
+    } finally {
+      setChallengePending(false)
+    }
+  }, [applySnapshot, canChallenge, challengePending, gameID])
+
   const runAction = useCallback(async (id: number, action: UnoActionRequest) => {
     try {
-      const snapshot = action.type === 'draw' ? await api.drawUnoCard(gameID) : await api.playUnoCard(gameID, action.cardIndex, action.color)
+      const snapshot = action.type === 'draw' ? await api.drawUnoCard(gameID) : action.type === 'challenge' ? await api.challengeUnoDrawFour(gameID) : await api.playUnoCard(gameID, action.cardIndex, action.color)
       applySnapshot(snapshot)
       postToFrame({ type: 'uno.action.result', id, ok: true })
     } catch (requestError) {
@@ -226,6 +249,17 @@ export function UnoGamePage() {
     {loading ? <div className="uno-game-loading"><LoadingState label="Loading match" /></div> : null}
     {accessGranted ? <>
         <iframe ref={frameRef} className="uno-game-frame" title="Uno 3D game" src={frameSrc} allow="fullscreen; pointer-lock" />
+      {canChallenge ? <section className="uno-challenge-panel" aria-label="Wild Draw Four challenge">
+        <div className="uno-challenge-copy">
+          <span className="uno-game-overlay-eyebrow">Special action</span>
+          <strong>A +4 card was played</strong>
+          <span>You can challenge the previous player's move.</span>
+          {challengeError ? <span className="uno-challenge-error" role="alert">{challengeError}</span> : null}
+        </div>
+        <button className="uno-challenge-button" type="button" onClick={() => void challengeDrawFour()} disabled={challengePending}>
+          {challengePending ? 'Challenging…' : 'Challenge +4'}
+        </button>
+      </section> : null}
       <section className="uno-game-overlay" aria-label="Match information">
         <div className="uno-game-overlay-header">
           <div className="uno-game-header-meta">{gameID ? <span>#{gameID.slice(0, 8)}</span> : null}</div>

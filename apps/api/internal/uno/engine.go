@@ -28,8 +28,6 @@ type Engine struct {
 	onChange func(Update)
 }
 
-// Update describes a committed state change. Snapshot renders the state for
-// one viewer so that hands stay private to their owner.
 type Update struct {
 	GameID   string
 	Status   string
@@ -50,21 +48,37 @@ type player struct {
 }
 
 type gameState struct {
-	GameID       string         `json:"gameId"`
-	Status       string         `json:"status"`
-	Version      int64          `json:"version"`
-	TurnPlayerID string         `json:"turnPlayerId"`
-	TurnNumber   int            `json:"turnNumber"`
-	Direction    int            `json:"direction"`
-	CurrentColor string         `json:"currentColor"`
-	DrawPile     []card         `json:"drawPile"`
-	DiscardPile  []card         `json:"discardPile"`
-	Players      []player       `json:"players"`
-	WinnerID     string         `json:"winnerId,omitempty"`
-	WinnerScore  int            `json:"winnerScore"`
-	Results      []PlayerResult `json:"results,omitempty"`
-	LastAction   string         `json:"lastAction"`
-	UpdatedAt    string         `json:"updatedAt"`
+	GameID            string         `json:"gameId"`
+	Status            string         `json:"status"`
+	Version           int64          `json:"version"`
+	TurnPlayerID      string         `json:"turnPlayerId"`
+	TurnNumber        int            `json:"turnNumber"`
+	Direction         int            `json:"direction"`
+	CurrentColor      string         `json:"currentColor"`
+	DrawPile          []card         `json:"drawPile"`
+	DiscardPile       []card         `json:"discardPile"`
+	Players           []player       `json:"players"`
+	WinnerID          string         `json:"winnerId,omitempty"`
+	WinnerScore       int            `json:"winnerScore"`
+	Results           []PlayerResult `json:"results,omitempty"`
+	LastAction        string         `json:"lastAction"`
+	UpdatedAt         string         `json:"updatedAt"`
+	Rules             gameRules      `json:"rules"`
+	PendingDraw       int            `json:"pendingDraw,omitempty"`
+	PendingW4By       string         `json:"pendingW4By,omitempty"`
+	PendingW4HadColor bool           `json:"pendingW4HadColor,omitempty"`
+	LastDrawnBy       string         `json:"lastDrawnBy,omitempty"`
+	LastDrawnCard     string         `json:"lastDrawnCard,omitempty"`
+}
+
+type gameRules struct {
+	DrawPenalty       int  `json:"drawPenalty"`
+	StackDrawCards    bool `json:"stackDrawCards"`
+	JumpIn            bool `json:"jumpIn"`
+	SevenZero         bool `json:"sevenZero"`
+	DrawUntilPlayable bool `json:"drawUntilPlayable"`
+	ForcePlay         bool `json:"forcePlay"`
+	ChallengeDrawFour bool `json:"challengeDrawFour"`
 }
 
 type PlayerResult struct {
@@ -101,11 +115,12 @@ type Snapshot struct {
 	WinnerScore  int            `json:"winnerScore"`
 	Results      []PlayerResult `json:"results,omitempty"`
 	LastAction   string         `json:"lastAction"`
+	PendingDraw  int            `json:"pendingDraw,omitempty"`
+	CanChallenge bool           `json:"canChallenge"`
 }
 
 func NewEngine(database *sql.DB) *Engine { return &Engine{database: database} }
 
-// OnChange registers the callback invoked after every committed mutation.
 func (engine *Engine) OnChange(callback func(Update)) { engine.onChange = callback }
 
 func (engine *Engine) emit(state *gameState) {
@@ -174,15 +189,46 @@ func (engine *Engine) State(gameID, viewerID string) (Snapshot, error) {
 
 func (engine *Engine) Draw(gameID, userID string) (Snapshot, error) {
 	return engine.mutate(gameID, userID, func(state *gameState, playerIndex int) error {
-		if len(state.DrawPile) == 0 {
-			engine.recycle(state)
+		if state.PendingDraw > 0 {
+			if err := engine.drawCards(state, playerIndex, state.PendingDraw); err != nil {
+				return err
+			}
+			state.PendingDraw = 0
+			state.PendingW4By = ""
+			state.PendingW4HadColor = false
+			state.LastAction = "draw-penalty"
+			engine.advance(state, playerIndex, 1)
+			return nil
 		}
-		if len(state.DrawPile) == 0 {
-			return fmt.Errorf("%w: draw pile is empty", ErrInvalidAction)
+		var drawn card
+		for {
+			if len(state.DrawPile) == 0 {
+				engine.recycle(state)
+			}
+			if len(state.DrawPile) == 0 {
+				engine.advance(state, playerIndex, 1)
+				state.LastAction = "draw-pile-empty-pass"
+				return nil
+			}
+			drawn = state.DrawPile[len(state.DrawPile)-1]
+			state.DrawPile = state.DrawPile[:len(state.DrawPile)-1]
+			state.Players[playerIndex].Hand = append(state.Players[playerIndex].Hand, drawn)
+			if !state.Rules.DrawUntilPlayable || canPlay(drawn.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
+				break
+			}
 		}
-		state.Players[playerIndex].Hand = append(state.Players[playerIndex].Hand, state.DrawPile[len(state.DrawPile)-1])
-		state.DrawPile = state.DrawPile[:len(state.DrawPile)-1]
+		state.LastDrawnBy, state.LastDrawnCard = userID, drawn.Face
 		state.LastAction = "draw"
+		if state.Rules.ForcePlay && canPlay(drawn.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
+			chosenColor := ""
+			if isWild(drawn.Face) {
+				chosenColor = mostCommonColor(state.Players[playerIndex].Hand[:len(state.Players[playerIndex].Hand)-1])
+			}
+			return engine.playFromHand(state, playerIndex, len(state.Players[playerIndex].Hand)-1, chosenColor)
+		}
+		if state.Rules.DrawUntilPlayable && canPlay(drawn.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
+			return nil
+		}
 		engine.advance(state, playerIndex, 1)
 		return nil
 	})
@@ -190,44 +236,163 @@ func (engine *Engine) Draw(gameID, userID string) (Snapshot, error) {
 
 func (engine *Engine) Play(gameID, userID string, cardIndex int, color string) (Snapshot, error) {
 	return engine.mutate(gameID, userID, func(state *gameState, playerIndex int) error {
-		hand := state.Players[playerIndex].Hand
-		if cardIndex < 0 || cardIndex >= len(hand) {
-			return fmt.Errorf("%w: card index is out of range", ErrInvalidCard)
-		}
-
-		played := hand[cardIndex]
-		if len(state.DiscardPile) == 0 || !canPlay(played.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
-			return fmt.Errorf("%w: card does not match the active color or symbol", ErrInvalidCard)
-		}
-
-		if isWild(played.Face) {
-			color = strings.ToUpper(strings.TrimSpace(color))
-			if color != "R" && color != "G" && color != "B" && color != "Y" {
-				return fmt.Errorf("%w: a color is required for a wild card", ErrInvalidAction)
+		if state.TurnPlayerID != userID {
+			if !state.Rules.JumpIn || len(state.DiscardPile) == 0 || cardIndex < 0 || cardIndex >= len(state.Players[playerIndex].Hand) || state.Players[playerIndex].Hand[cardIndex].Face != state.DiscardPile[len(state.DiscardPile)-1].Face {
+				return ErrNotYourTurn
 			}
-			state.CurrentColor = color
-		} else {
-			state.CurrentColor = colorOf(played.Face)
+			state.TurnPlayerID = userID
 		}
+		return engine.playFromHand(state, playerIndex, cardIndex, color)
+	}, true)
+}
 
-		state.Players[playerIndex].Hand = append(hand[:cardIndex], hand[cardIndex+1:]...)
-		state.DiscardPile = append(state.DiscardPile, played)
-		state.LastAction = "play"
+func (engine *Engine) playFromHand(state *gameState, playerIndex, cardIndex int, color string) error {
+	hand := state.Players[playerIndex].Hand
+	if cardIndex < 0 || cardIndex >= len(hand) {
+		return fmt.Errorf("%w: card index is out of range", ErrInvalidCard)
+	}
+	played := hand[cardIndex]
+	if state.PendingDraw > 0 {
+		if !state.Rules.StackDrawCards || (symbolOf(played.Face) != "A2" && played.Face != "W4") {
+			return fmt.Errorf("%w: a draw penalty must be accepted or stacked", ErrInvalidCard)
+		}
+	} else if len(state.DiscardPile) == 0 || !canPlay(played.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
+		return fmt.Errorf("%w: card does not match the active color or symbol", ErrInvalidCard)
+	}
+	previousColor := state.CurrentColor
+	hadActiveColor := false
+	if played.Face == "W4" {
+		for i, c := range hand {
+			if i != cardIndex && colorOf(c.Face) == previousColor {
+				hadActiveColor = true
+			}
+		}
+	}
+	if isWild(played.Face) {
+		color = strings.ToUpper(strings.TrimSpace(color))
+		if color != "R" && color != "G" && color != "B" && color != "Y" {
+			return fmt.Errorf("%w: a color is required for a wild card", ErrInvalidAction)
+		}
+		state.CurrentColor = color
+	} else {
+		state.CurrentColor = colorOf(played.Face)
+	}
 
-		if len(state.Players[playerIndex].Hand) == 0 {
-			state.Status = "finished"
-			state.WinnerID = userID
-			state.Players[playerIndex].Finished = true
-			state.Results = calculateResults(state, playerIndex)
-			state.WinnerScore = state.Results[0].PointsEarned
+	state.Players[playerIndex].Hand = append(hand[:cardIndex], hand[cardIndex+1:]...)
+	state.DiscardPile = append(state.DiscardPile, played)
+	state.LastAction = "play"
+	state.LastDrawnBy, state.LastDrawnCard = "", ""
+	if len(state.Players[playerIndex].Hand) == 0 {
+		state.Status = "finished"
+		state.WinnerID = state.Players[playerIndex].ID
+		state.Players[playerIndex].Finished = true
+		state.Results = calculateResults(state, playerIndex)
+		state.WinnerScore = state.Results[0].PointsEarned
+		return nil
+	}
+	if state.PendingDraw > 0 && state.Rules.StackDrawCards {
+		state.PendingDraw += penaltyFor(played.Face, state.Rules.DrawPenalty)
+	} else if played.Face == "W4" || symbolOf(played.Face) == "A2" {
+		state.PendingDraw = penaltyFor(played.Face, state.Rules.DrawPenalty)
+	}
+	if played.Face == "W4" {
+		state.PendingW4By = state.Players[playerIndex].ID
+		state.PendingW4HadColor = hadActiveColor
+	}
+	if state.Rules.SevenZero && symbolOf(played.Face) == "7" {
+		next, ok := nextIndexRaw(state, playerIndex)
+		if ok {
+			state.Players[playerIndex].Hand, state.Players[next].Hand = state.Players[next].Hand, state.Players[playerIndex].Hand
+		}
+	}
+	if state.Rules.SevenZero && symbolOf(played.Face) == "0" {
+		rotateHands(state)
+	}
+	steps, err := engine.applyCardEffect(state, playerIndex, played)
+	if err != nil {
+		return err
+	}
+	if state.PendingDraw > 0 && state.Rules.StackDrawCards {
+		steps = 1
+	}
+	engine.advance(state, playerIndex, steps)
+	return nil
+}
+
+func penaltyFor(face string, configured int) int {
+	if face == "W4" {
+		return 4
+	}
+	if configured < 1 {
+		return 2
+	}
+	return configured
+}
+func mostCommonColor(hand []card) string {
+	counts := map[string]int{"R": 0, "G": 0, "B": 0, "Y": 0}
+	for _, c := range hand {
+		if color := colorOf(c.Face); color != "" {
+			counts[color]++
+		}
+	}
+	best := "R"
+	for _, color := range []string{"G", "B", "Y"} {
+		if counts[color] > counts[best] {
+			best = color
+		}
+	}
+	return best
+}
+func nextIndexRaw(state *gameState, current int) (int, bool) {
+	n := len(state.Players)
+	if n < 2 {
+		return 0, false
+	}
+	i := (current + state.Direction + n) % n
+	return i, !state.Players[i].Finished
+}
+func rotateHands(state *gameState) {
+	active := activePlayers(state)
+	if len(active) < 2 {
+		return
+	}
+	hands := make([][]card, len(active))
+	for i, p := range active {
+		hands[i] = state.Players[p].Hand
+	}
+	for i, p := range active {
+		state.Players[p].Hand = hands[(i-1+len(active))%len(active)]
+	}
+}
+
+func (engine *Engine) ChallengeDrawFour(gameID, userID string) (Snapshot, error) {
+	return engine.mutate(gameID, userID, func(state *gameState, playerIndex int) error {
+		if !state.Rules.ChallengeDrawFour || state.PendingW4By == "" || state.PendingDraw != 4 {
+			return fmt.Errorf("%w: there is no challengeable +4", ErrInvalidAction)
+		}
+		if state.PendingW4HadColor {
+			for i := range state.Players {
+				if state.Players[i].ID == state.PendingW4By {
+					if err := engine.drawCards(state, i, 4); err != nil {
+						return err
+					}
+					break
+				}
+			}
+			state.PendingDraw = 0
+			state.PendingW4By = ""
+			state.PendingW4HadColor = false
+			state.LastAction = "challenge-success"
 			return nil
 		}
-
-		steps, err := engine.applyCardEffect(state, playerIndex, played)
-		if err != nil {
+		if err := engine.drawCards(state, playerIndex, 6); err != nil {
 			return err
 		}
-		engine.advance(state, playerIndex, steps)
+		state.PendingDraw = 0
+		state.PendingW4By = ""
+		state.PendingW4HadColor = false
+		state.LastAction = "challenge-failed"
+		engine.advance(state, playerIndex, 1)
 		return nil
 	})
 }
@@ -292,26 +457,12 @@ func (engine *Engine) applyCardEffect(state *gameState, playerIndex int, played 
 		return 1, nil
 
 	case "W4":
-		target, ok := engine.nextPlayerIndex(state, playerIndex)
-		if !ok {
-			return 0, fmt.Errorf("%w: there is no next player", ErrInvalidAction)
-		}
-		if err := engine.drawCards(state, target, 4); err != nil {
-			return 0, err
-		}
-		return 2, nil
+		return 1, nil
 
 	default:
 		switch symbolOf(played.Face) {
 		case "A2":
-			target, ok := engine.nextPlayerIndex(state, playerIndex)
-			if !ok {
-				return 0, fmt.Errorf("%w: there is no next player", ErrInvalidAction)
-			}
-			if err := engine.drawCards(state, target, 2); err != nil {
-				return 0, err
-			}
-			return 2, nil
+			return 1, nil
 
 		case "S":
 			return 2, nil
@@ -334,7 +485,7 @@ func (engine *Engine) drawCards(state *gameState, targetIndex, count int) error 
 			engine.recycle(state)
 		}
 		if len(state.DrawPile) == 0 {
-			return fmt.Errorf("%w: not enough cards to apply the penalty", ErrInvalidAction)
+			break
 		}
 
 		last := len(state.DrawPile) - 1
@@ -372,7 +523,7 @@ func activePlayers(state *gameState) []int {
 	return active
 }
 
-func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int) error) (Snapshot, error) {
+func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int) error, allowJump ...bool) (Snapshot, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	tx, err := engine.database.Begin()
@@ -398,7 +549,9 @@ func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int)
 		return Snapshot{}, ErrGameNotActive
 	}
 	if state.TurnPlayerID != userID {
-		return Snapshot{}, ErrNotYourTurn
+		if len(allowJump) == 0 || !allowJump[0] {
+			return Snapshot{}, ErrNotYourTurn
+		}
 	}
 	if err = action(state, playerIndex); err != nil {
 		return Snapshot{}, err
@@ -454,8 +607,8 @@ func (engine *Engine) loadOrCreate(tx *sql.Tx, gameID string) (*gameState, error
 }
 
 func initialize(tx *sql.Tx, gameID string) (*gameState, error) {
-	var handSize, maxPlayers, botsEnabled, multipleDecks int
-	if err := tx.QueryRow(`SELECT COALESCE(max_players,4),COALESCE(starting_hand_size,7),COALESCE(bots_enabled,0),COALESCE(allow_multiple_decks,0) FROM game_settings WHERE game_id=?`, gameID).Scan(&maxPlayers, &handSize, &botsEnabled, &multipleDecks); err != nil {
+	var handSize, maxPlayers, botsEnabled, multipleDecks, drawPenalty, stack, jump, seven, drawUntil, force, challenge int
+	if err := tx.QueryRow(`SELECT COALESCE(max_players,4),COALESCE(starting_hand_size,7),COALESCE(bots_enabled,0),COALESCE(allow_multiple_decks,0),COALESCE(draw_penalty,2),COALESCE(stack_draw_cards,0),COALESCE(jump_in,0),COALESCE(seven_zero,0),COALESCE(draw_until_playable,0),COALESCE(force_play,0),COALESCE(challenge_draw_four,1) FROM game_settings WHERE game_id=?`, gameID).Scan(&maxPlayers, &handSize, &botsEnabled, &multipleDecks, &drawPenalty, &stack, &jump, &seven, &drawUntil, &force, &challenge); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(`SELECT p.user_id,u.username FROM game_participants p JOIN users u ON u.id=p.user_id JOIN games g ON g.id=p.game_id WHERE p.game_id=? ORDER BY CASE WHEN p.user_id=g.created_by THEN 0 ELSE 1 END,p.user_id`, gameID)
@@ -463,7 +616,7 @@ func initialize(tx *sql.Tx, gameID string) (*gameState, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	state := &gameState{GameID: gameID, Status: "active", Version: 1, Direction: 1, TurnNumber: 1, UpdatedAt: now()}
+	state := &gameState{GameID: gameID, Status: "active", Version: 1, Direction: 1, TurnNumber: 1, UpdatedAt: now(), Rules: gameRules{DrawPenalty: drawPenalty, StackDrawCards: stack != 0, JumpIn: jump != 0, SevenZero: seven != 0, DrawUntilPlayable: drawUntil != 0, ForcePlay: force != 0, ChallengeDrawFour: challenge != 0}}
 	for rows.Next() {
 		var id, name string
 		if err = rows.Scan(&id, &name); err != nil {
@@ -529,6 +682,42 @@ func (engine *Engine) recycle(state *gameState) {
 	top := state.DiscardPile[len(state.DiscardPile)-1]
 	state.DrawPile = append(state.DrawPile, state.DiscardPile[:len(state.DiscardPile)-1]...)
 	state.DiscardPile = []card{top}
+	rand.Shuffle(len(state.DrawPile), func(i, j int) {
+		state.DrawPile[i], state.DrawPile[j] = state.DrawPile[j], state.DrawPile[i]
+	})
+}
+
+func (engine *Engine) noCardsAvailable(state *gameState) bool {
+	return len(state.DrawPile) == 0 && len(state.DiscardPile) <= 1
+}
+
+func (engine *Engine) finishByLowestHand(state *gameState) {
+	if len(state.Players) == 0 {
+		state.Status = "finished"
+		state.LastAction = "round-ended-no-cards"
+		return
+	}
+	winnerIndex := -1
+	lowest := int(^uint(0) >> 1)
+	for i := range state.Players {
+		if state.Players[i].Finished {
+			continue
+		}
+		points := calculateHandPoints(state.Players[i].Hand)
+		if winnerIndex == -1 || points < lowest {
+			winnerIndex, lowest = i, points
+		}
+	}
+	if winnerIndex == -1 {
+		winnerIndex = 0
+	}
+	state.Status = "finished"
+	state.WinnerID = state.Players[winnerIndex].ID
+	state.Results = calculateResults(state, winnerIndex)
+	if len(state.Results) > 0 {
+		state.WinnerScore = state.Results[0].PointsEarned
+	}
+	state.LastAction = "round-ended-no-cards"
 }
 
 func (engine *Engine) advance(state *gameState, current, steps int) {
@@ -550,7 +739,7 @@ func (engine *Engine) advance(state *gameState, current, steps int) {
 }
 
 func publicSnapshot(state *gameState, viewerID string) Snapshot {
-	snapshot := Snapshot{GameID: state.GameID, Status: state.Status, Version: state.Version, TurnPlayerID: state.TurnPlayerID, TurnNumber: state.TurnNumber, CurrentColor: state.CurrentColor, DrawCount: len(state.DrawPile), LastAction: state.LastAction, WinnerID: state.WinnerID, WinnerScore: state.WinnerScore, Results: append([]PlayerResult(nil), state.Results...)}
+	snapshot := Snapshot{GameID: state.GameID, Status: state.Status, Version: state.Version, TurnPlayerID: state.TurnPlayerID, TurnNumber: state.TurnNumber, CurrentColor: state.CurrentColor, DrawCount: len(state.DrawPile), LastAction: state.LastAction, WinnerID: state.WinnerID, WinnerScore: state.WinnerScore, Results: append([]PlayerResult(nil), state.Results...), PendingDraw: state.PendingDraw, CanChallenge: state.PendingW4By != "" && state.Rules.ChallengeDrawFour}
 	if len(state.DiscardPile) > 0 {
 		snapshot.TopCard = state.DiscardPile[len(state.DiscardPile)-1].Face
 	}

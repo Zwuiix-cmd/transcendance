@@ -33,3 +33,17 @@
   .uno-game-info-card { right: 10px; bottom: 10px; left: 10px; width: auto; }
   .uno-game-spectator-bar { display: none; }
 }
+
+/* React-side controls for special UNO actions, kept outside the 3D iframe. */
+.uno-challenge-panel { position: absolute; z-index: 5; top: 18px; left: 50%; display: flex; align-items: center; gap: 18px; width: min(520px, calc(100vw - 32px)); padding: 14px 16px; transform: translateX(-50%); border: 1px solid rgba(251, 191, 36, .45); border-radius: 12px; color: #f8f4ff; background: rgba(24, 18, 32, .94); box-shadow: 0 16px 42px rgba(0, 0, 0, .34); backdrop-filter: blur(14px); }
+.uno-challenge-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; font-size: .75rem; }
+.uno-challenge-copy strong { color: #fff; font-size: .92rem; }
+.uno-challenge-copy > span:not(.uno-game-overlay-eyebrow) { color: #c9c1d2; }
+.uno-challenge-error { color: #fca5a5 !important; }
+.uno-challenge-button { flex: 0 0 auto; min-height: 40px; padding: 0 15px; border: 1px solid #fbbf24; border-radius: 8px; color: #241707; background: #fbbf24; font: inherit; font-size: .75rem; font-weight: 800; cursor: pointer; transition: background .15s ease, transform .15s ease; }
+.uno-challenge-button:hover:not(:disabled) { background: #fcd34d; transform: translateY(-1px); }
+.uno-challenge-button:disabled { cursor: wait; opacity: .65; }
+@media (max-width: 560px) {
+  .uno-challenge-panel { top: 10px; align-items: stretch; flex-direction: column; gap: 10px; padding: 12px; }
+  .uno-challenge-button { width: 100%; }
+}
