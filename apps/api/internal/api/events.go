@@ -7,6 +7,9 @@ import (
 	"card-arena/api/internal/model"
 	"card-arena/api/internal/realtime"
 	unogame "card-arena/api/internal/uno"
+	"time"
+
+	"card-arena/api/internal/settlement"
 )
 
 // PublishGame pushes the lobby view of a game to every subscriber. The view
@@ -46,15 +49,84 @@ func (server *Server) publishMatchmaking(userID string, status model.Matchmaking
 }
 
 func (server *Server) publishUnoUpdate(update unogame.Update) {
-	server.hub.Publish(realtime.Event{Topic: realtime.GameTopic(update.GameID), Name: realtime.EventUnoState, Render: func(viewerID string) any {
-		if !gamesdependencies.HasGameAccess(server.store.DB, update.GameID, viewerID) {
-			return nil
-		}
-		return update.Snapshot(viewerID)
-	}})
-	if update.Status == "finished" {
-		server.PublishGame(update.GameID)
-		server.PublishLobbies()
-		slog.Info("uno game finished", "game", update.GameID, "winner", update.WinnerID)
-	}
+    // End of game
+    if update.Status == "finished" && len(update.Results) >= 2 {
+        participants := make([]settlement.Participant, 0, len(update.Results))
+
+        for _, result := range update.Results {
+            participants = append(participants, settlement.Participant{
+                UserID:          result.PlayerID,
+                Position:        result.Rank,
+                Score:           result.PointsEarned,
+                UnosCalled:      result.UnosCalled,
+                UnoPenalties:    result.UnoPenalties,
+                DrawFoursPlayed: result.DrawFourPlayed,
+                CardsDrawn:      result.CardsDrawn,
+            })
+        }
+
+        tx, err := server.store.DB.Begin()
+        if err != nil {
+            slog.Error("could not begin game settlement",
+                "game", update.GameID,
+                "error", err,
+            )
+        } else {
+            outcome, err := settlement.Apply(
+                tx,
+                settlement.Result{
+                    GameID:       update.GameID,
+                    Participants: participants,
+                },
+                time.Now().UTC(),
+            )
+
+            if err != nil {
+                _ = tx.Rollback()
+
+                slog.Error("could not settle game",
+                    "game", update.GameID,
+                    "error", err,
+                )
+            } else if err := tx.Commit(); err != nil {
+                slog.Error("could not commit game settlement",
+                    "game", update.GameID,
+                    "error", err,
+                )
+            } else if !outcome.AlreadySettled {
+                server.PublishLeaderboard()
+
+                for _, participant := range outcome.Participants {
+                    server.PublishProfile(participant.UserID)
+                }
+            }
+        }
+    }
+
+    // Broadcast the state to the players
+    server.hub.Publish(realtime.Event{
+        Topic: realtime.GameTopic(update.GameID),
+        Name:  realtime.EventUnoState,
+        Render: func(viewerID string) any {
+            if !gamesdependencies.HasGameAccess(
+                server.store.DB,
+                update.GameID,
+                viewerID,
+            ) {
+                return nil
+            }
+
+            return update.Snapshot(viewerID)
+        },
+    })
+
+    if update.Status == "finished" {
+        server.PublishGame(update.GameID)
+        server.PublishLobbies()
+
+        slog.Info("uno game finished",
+            "game", update.GameID,
+            "winner", update.WinnerID,
+        )
+    }
 }

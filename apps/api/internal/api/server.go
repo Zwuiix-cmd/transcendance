@@ -111,6 +111,7 @@ func NewServer(cfg config.Config, store *db.Store) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{cfg: cfg, store: store, cache: cache.New(cfg.RedisURL), client: &http.Client{Timeout: 10 * time.Second}, limiter: newRateLimiter(), uno: unogame.NewEngine(store.DB), hub: realtime.NewHub(), ctx: ctx, cancel: cancel, maintenanceStop: make(chan struct{}), maintenanceDone: make(chan struct{})}
 	server.queue = matchmaking.New(server.publishMatchmaking)
+	server.queue.SetMatchHandler(server.createMatchGame)
 	server.uno.OnChange(server.publishUnoUpdate)
 	server.audit = newAuditWriter(store)
 	server.router = NewRouter(server)

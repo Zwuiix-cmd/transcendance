@@ -90,6 +90,7 @@ export type MatchmakingStatus = {
   searchEloMin: number | null
   searchEloMax: number | null
   searchEloGap: number | null
+  gameId: string | null
 }
 
 export type LobbyParticipant = {
@@ -128,6 +129,10 @@ export type PlayerResult = {
   cardsRemaining: number
   handPoints: number
   pointsEarned: number
+  unosCalled: number
+	unoPenalties: number
+	drawFourPlayed: number
+	cardsDrawn: number
 }
 
 export type UnoSnapshot = {

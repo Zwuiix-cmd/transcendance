@@ -29,10 +29,11 @@ type Engine struct {
 }
 
 type Update struct {
-	GameID   string
-	Status   string
-	WinnerID string
-	Snapshot func(viewerID string) Snapshot
+    GameID   string
+    Status   string
+    WinnerID string
+    Results  []PlayerResult
+    Snapshot func(viewerID string) Snapshot
 }
 
 type card struct {
@@ -90,6 +91,10 @@ type PlayerResult struct {
 	CardsRemaining int    `json:"cardsRemaining"`
 	HandPoints     int    `json:"handPoints"`
 	PointsEarned   int    `json:"pointsEarned"`
+	UnosCalled	   int	  `json:"unosCalled"`
+	UnoPenalties   int	  `json:"unoPenalties"`
+	DrawFourPlayed int	  `json:"drawFourPlayed"`
+	CardsDrawn	   int	  `json:"cardsDrawn"`
 }
 
 type PublicPlayer struct {
@@ -124,11 +129,22 @@ func NewEngine(database *sql.DB) *Engine { return &Engine{database: database} }
 func (engine *Engine) OnChange(callback func(Update)) { engine.onChange = callback }
 
 func (engine *Engine) emit(state *gameState) {
-	if engine.onChange == nil {
-		return
-	}
-	copied := *state
-	engine.onChange(Update{GameID: copied.GameID, Status: copied.Status, WinnerID: copied.WinnerID, Snapshot: func(viewerID string) Snapshot { return publicSnapshot(&copied, viewerID) }})
+    if engine.onChange == nil {
+        return
+    }
+
+    copied := *state
+    copied.Results = append([]PlayerResult(nil), state.Results...)
+
+    engine.onChange(Update{
+        GameID:   copied.GameID,
+        Status:   copied.Status,
+        WinnerID: copied.WinnerID,
+        Results:  copied.Results,
+        Snapshot: func(viewerID string) Snapshot {
+            return publicSnapshot(&copied, viewerID)
+        },
+    })
 }
 
 func (engine *Engine) Start(gameID, userID string) (Snapshot, error) {
@@ -413,6 +429,10 @@ func calculateResults(state *gameState, winnerIndex int) []PlayerResult {
 			Winner:         index == winnerIndex,
 			CardsRemaining: len(current.Hand),
 			HandPoints:     handPoints,
+			UnosCalled:	    0,
+			UnoPenalties:   0,
+			DrawFourPlayed: 0,
+			CardsDrawn:     0,
 		})
 	}
 
@@ -559,11 +579,11 @@ func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int)
 	state.Version++
 	state.TurnNumber++
 	state.UpdatedAt = now()
-	if state.Status == "finished" {
+	/*if state.Status == "finished" {
 		if _, err = tx.Exec(`UPDATE games SET status='finished',ended_at=? WHERE id=?`, state.UpdatedAt, gameID); err != nil {
 			return Snapshot{}, err
 		}
-	}
+	}*/
 	if err = save(tx, state); err != nil {
 		return Snapshot{}, err
 	}
