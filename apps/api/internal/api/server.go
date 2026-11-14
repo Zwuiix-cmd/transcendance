@@ -125,6 +125,7 @@ func (server *Server) UnoGame() *unogame.Engine { return server.uno }
 func (server *Server) Hub() *realtime.Hub { return server.hub }
 
 func (server *Server) Close() error {
+	server.uno.Stop()
 	server.queue.Stop()
 	close(server.maintenanceStop)
 	<-server.maintenanceDone
@@ -160,7 +161,7 @@ func (server *Server) serveHTTP(writer http.ResponseWriter, request *http.Reques
 
 	clientKey := server.clientKey(request)
 	if !server.validAPIKey(request.Header.Get("X-API-Key")) {
-		if server.cfg.Environment != "development"{
+		if server.cfg.Environment != "development" {
 
 			allowed, retry := server.allowRate(request, "invalid:"+clientKey, server.cfg.InvalidRequestsPerMinute)
 			if !allowed {

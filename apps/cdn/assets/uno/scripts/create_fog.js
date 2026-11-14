@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadHlsl } from './volume_shaders.js';
+import { loadHlsl } from './volume_shaders.js?v=shaders-20261114-v30';
 
 export async function createFog(volumes) {
     const [shared, groundSource, forestSource] = await Promise.all([

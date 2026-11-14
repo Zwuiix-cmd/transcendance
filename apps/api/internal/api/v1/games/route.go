@@ -27,7 +27,7 @@ func HandleList(context *route.Context) {
 		return
 	}
 	limit, offset, page := gamesdependencies.Pagination(context.Request, 20, 100)
-	query := `SELECT g.id,g.status,g.created_by,u.username,g.created_at,g.started_at,g.ended_at,g.turn_time_limit,g.mode,g.is_private,g.join_code,COALESCE(gs.max_players,4),COALESCE(gs.starting_hand_size,7),COALESCE(gs.draw_penalty,2),COALESCE(gs.stack_draw_cards,0),COALESCE(gs.jump_in,0),COALESCE(gs.seven_zero,0),COALESCE(gs.draw_until_playable,0),COALESCE(gs.force_play,0),COALESCE(gs.challenge_draw_four,1),COALESCE(gs.allow_multiple_decks,0),COALESCE(gs.bots_enabled,0),(SELECT COUNT(*) FROM game_participants p WHERE p.game_id=g.id),EXISTS(SELECT 1 FROM game_participants p2 WHERE p2.game_id=g.id AND p2.user_id=?),(SELECT EXISTS(SELECT 1 FROM game_spectators s2 WHERE s2.game_id=g.id AND s2.user_id=?)),(SELECT COUNT(*) FROM game_spectators s WHERE s.game_id=g.id),(SELECT COUNT(*) FROM game_whitelist w WHERE w.game_id=g.id) FROM games g LEFT JOIN users u ON u.id=g.created_by LEFT JOIN game_settings gs ON gs.game_id=g.id WHERE g.mode='custom'`
+	query := `SELECT g.id,g.status,g.created_by,u.username,g.created_at,g.started_at,g.ended_at,g.turn_time_limit,g.mode,g.is_private,g.join_code,COALESCE(gs.max_players,4),COALESCE(gs.starting_hand_size,7),COALESCE(gs.draw_penalty,2),COALESCE(gs.stack_draw_cards,0),COALESCE(gs.jump_in,0),COALESCE(gs.seven_zero,0),COALESCE(gs.draw_until_playable,0),COALESCE(gs.force_play,0),COALESCE(gs.challenge_draw_four,1),COALESCE(gs.allow_multiple_decks,0),COALESCE(gs.bots_enabled,0),COALESCE(gs.bot_difficulty,'intermediate'),(SELECT COUNT(*) FROM game_participants p WHERE p.game_id=g.id),EXISTS(SELECT 1 FROM game_participants p2 WHERE p2.game_id=g.id AND p2.user_id=?),(SELECT EXISTS(SELECT 1 FROM game_spectators s2 WHERE s2.game_id=g.id AND s2.user_id=?)),(SELECT COUNT(*) FROM game_spectators s WHERE s.game_id=g.id),(SELECT COUNT(*) FROM game_whitelist w WHERE w.game_id=g.id) FROM games g LEFT JOIN users u ON u.id=g.created_by LEFT JOIN game_settings gs ON gs.game_id=g.id WHERE g.mode='custom'`
 	if status != "" {
 		query += ` AND g.status=?`
 	}
@@ -121,6 +121,13 @@ func HandleCreate(context *route.Context) {
 	}
 	settings.AllowMultipleDecks = input.AllowMultipleDecks
 	settings.BotsEnabled = input.BotsEnabled
+	if input.BotDifficulty != "" {
+		settings.BotDifficulty = strings.ToLower(strings.TrimSpace(input.BotDifficulty))
+	}
+	if !model.ValidBotDifficulty(settings.BotDifficulty) {
+		gamesdependencies.WriteError(context.Writer, http.StatusBadRequest, "invalid_bot_difficulty", "Bot difficulty must be easy, intermediate or expert")
+		return
+	}
 	if settings.MaxPlayers < 2 || settings.MaxPlayers > 8 || settings.StartingHandSize < 3 || settings.StartingHandSize > 14 || settings.DrawPenalty < 1 || settings.DrawPenalty > 4 {
 		gamesdependencies.WriteError(context.Writer, http.StatusBadRequest, "invalid_settings", "The game settings are outside their allowed range")
 		return
@@ -149,7 +156,7 @@ func HandleCreate(context *route.Context) {
 	}
 	_, err = tx.Exec(`INSERT INTO games(id,status,created_by,turn_time_limit,mode,is_private,join_code,created_at) VALUES(?,?,?,?,?,?,?,?)`, id, "waiting", userID, turn, mode, boolInt(input.PrivateGame), blankValue(code), created)
 	if err == nil {
-		_, err = tx.Exec(`INSERT INTO game_settings(game_id,max_players,starting_hand_size,draw_penalty,stack_draw_cards,jump_in,seven_zero,draw_until_playable,force_play,challenge_draw_four,allow_multiple_decks,bots_enabled) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, settings.MaxPlayers, settings.StartingHandSize, settings.DrawPenalty, boolInt(settings.StackDrawCards), boolInt(settings.JumpIn), boolInt(settings.SevenZero), boolInt(settings.DrawUntilPlayable), boolInt(settings.ForcePlay), boolInt(settings.ChallengeDrawFour), boolInt(settings.AllowMultipleDecks), boolInt(settings.BotsEnabled))
+		_, err = tx.Exec(`INSERT INTO game_settings(game_id,max_players,starting_hand_size,draw_penalty,stack_draw_cards,jump_in,seven_zero,draw_until_playable,force_play,challenge_draw_four,allow_multiple_decks,bots_enabled,bot_difficulty) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, settings.MaxPlayers, settings.StartingHandSize, settings.DrawPenalty, boolInt(settings.StackDrawCards), boolInt(settings.JumpIn), boolInt(settings.SevenZero), boolInt(settings.DrawUntilPlayable), boolInt(settings.ForcePlay), boolInt(settings.ChallengeDrawFour), boolInt(settings.AllowMultipleDecks), boolInt(settings.BotsEnabled), settings.BotDifficulty)
 	}
 	if err == nil {
 		_, err = tx.Exec(`INSERT INTO game_participants(game_id,user_id,last_seen_at) VALUES(?,?,?)`, id, userID, created)
@@ -187,6 +194,7 @@ type createGameRequest struct {
 	ChallengeDrawFour  *bool  `json:"challengeDrawFour"`
 	AllowMultipleDecks bool   `json:"allowMultipleDecks"`
 	BotsEnabled        bool   `json:"botsEnabled"`
+	BotDifficulty      string `json:"botDifficulty"`
 }
 
 var gameStatusPattern = regexp.MustCompile(`^(waiting|in_progress|finished)$`)

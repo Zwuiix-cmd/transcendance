@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS game_settings (
     challenge_draw_four INTEGER NOT NULL DEFAULT 1 CHECK (challenge_draw_four IN (0, 1)),
     allow_multiple_decks INTEGER NOT NULL DEFAULT 0 CHECK (allow_multiple_decks IN (0, 1)),
     bots_enabled INTEGER NOT NULL DEFAULT 0 CHECK (bots_enabled IN (0, 1)),
+    bot_difficulty TEXT NOT NULL DEFAULT 'intermediate' CHECK (bot_difficulty IN ('easy', 'intermediate', 'expert')),
     CONSTRAINT fk_game_settings_game
         FOREIGN KEY (game_id) REFERENCES games (id) ON DELETE CASCADE
 );

@@ -33,21 +33,32 @@ type AuthResponse struct {
 }
 
 type GameSettings struct {
-	MaxPlayers         int  `json:"maxPlayers"`
-	StartingHandSize   int  `json:"startingHandSize"`
-	DrawPenalty        int  `json:"drawPenalty"`
-	StackDrawCards     bool `json:"stackDrawCards"`
-	JumpIn             bool `json:"jumpIn"`
-	SevenZero          bool `json:"sevenZero"`
-	DrawUntilPlayable  bool `json:"drawUntilPlayable"`
-	ForcePlay          bool `json:"forcePlay"`
-	ChallengeDrawFour  bool `json:"challengeDrawFour"`
-	AllowMultipleDecks bool `json:"allowMultipleDecks"`
-	BotsEnabled        bool `json:"botsEnabled"`
+	MaxPlayers         int    `json:"maxPlayers"`
+	StartingHandSize   int    `json:"startingHandSize"`
+	DrawPenalty        int    `json:"drawPenalty"`
+	StackDrawCards     bool   `json:"stackDrawCards"`
+	JumpIn             bool   `json:"jumpIn"`
+	SevenZero          bool   `json:"sevenZero"`
+	DrawUntilPlayable  bool   `json:"drawUntilPlayable"`
+	ForcePlay          bool   `json:"forcePlay"`
+	ChallengeDrawFour  bool   `json:"challengeDrawFour"`
+	AllowMultipleDecks bool   `json:"allowMultipleDecks"`
+	BotsEnabled        bool   `json:"botsEnabled"`
+	BotDifficulty      string `json:"botDifficulty"`
+}
+
+const (
+	BotDifficultyEasy         = "easy"
+	BotDifficultyIntermediate = "intermediate"
+	BotDifficultyExpert       = "expert"
+)
+
+func ValidBotDifficulty(value string) bool {
+	return value == BotDifficultyEasy || value == BotDifficultyIntermediate || value == BotDifficultyExpert
 }
 
 func DefaultGameSettings() GameSettings {
-	return GameSettings{MaxPlayers: 4, StartingHandSize: 7, DrawPenalty: 2, ChallengeDrawFour: true}
+	return GameSettings{MaxPlayers: 4, StartingHandSize: 7, DrawPenalty: 2, ChallengeDrawFour: true, BotDifficulty: BotDifficultyIntermediate}
 }
 
 type Game struct {

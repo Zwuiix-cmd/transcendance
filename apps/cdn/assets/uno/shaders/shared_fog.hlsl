@@ -52,7 +52,7 @@ half4 Frag(Varyings varyings)
     int steps = int(_Steps);
     float stepLength = (end - start) / float(steps);
     float jitter = frac(52.9829189 * frac(dot(varyings.positionCS.xy, float2(0.06711056, 0.00583715))));
-    float transmission = 1.0;
+    float opticalDepth = 0.0;
     for (int step = 0; step < steps; step++)
     {
         float travel = start + (float(step) + jitter) * stepLength;
@@ -65,9 +65,9 @@ half4 Frag(Varyings varyings)
             float fade = smoothstep(0.0, _EdgeFade, min(edge.x, min(edge.y, edge.z)));
             float density = max(0.0, FogDensity(p, local)) * fade;
         #endif
-        transmission *= exp(-density * stepLength);
-        if (transmission < 0.004) break;
+        opticalDepth += density * stepLength;
+        if (opticalDepth > 5.521460917862246) break;
     }
-    float opacity = 1.0 - transmission;
+    float opacity = 1.0 - exp(-opticalDepth);
     return half4(_Color.rgb * opacity, opacity);
 }

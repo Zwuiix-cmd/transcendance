@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"strings"
 	"sync"
 	"time"
 )
@@ -18,12 +17,17 @@ var (
 	ErrInvalidAction    = errors.New("uno action is invalid")
 	ErrNotOwner         = errors.New("user is not the game owner")
 	ErrNotEnoughPlayers = errors.New("the game needs more players")
+	ErrNotAPlayer       = errors.New("user is not seated at this table")
 )
 
 type Engine struct {
 	database *sql.DB
 	mu       sync.Mutex
+	random   *rand.Rand
 	onChange func(Update)
+	timers   map[string]*botTimers
+	stopped  bool
+	botSpeed float64
 }
 
 // Update describes a committed state change. Snapshot renders the state for
@@ -40,27 +44,51 @@ type card struct {
 }
 
 type player struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Bot      bool   `json:"bot"`
-	Finished bool   `json:"finished"`
-	Hand     []card `json:"hand"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Bot       bool   `json:"bot"`
+	Finished  bool   `json:"finished"`
+	SaidUno   bool   `json:"saidUno"`
+	HandValue int    `json:"handValue"`
+	Hand      []card `json:"hand"`
 }
 
 type gameState struct {
-	GameID       string   `json:"gameId"`
-	Status       string   `json:"status"`
-	Version      int64    `json:"version"`
-	TurnPlayerID string   `json:"turnPlayerId"`
-	TurnNumber   int      `json:"turnNumber"`
-	Direction    int      `json:"direction"`
-	CurrentColor string   `json:"currentColor"`
-	DrawPile     []card   `json:"drawPile"`
-	DiscardPile  []card   `json:"discardPile"`
-	Players      []player `json:"players"`
-	WinnerID     string   `json:"winnerId,omitempty"`
-	LastAction   string   `json:"lastAction"`
-	UpdatedAt    string   `json:"updatedAt"`
+	GameID        string              `json:"gameId"`
+	Status        string              `json:"status"`
+	Version       int64               `json:"version"`
+	TurnPlayerID  string              `json:"turnPlayerId"`
+	TurnNumber    int                 `json:"turnNumber"`
+	Direction     int                 `json:"direction"`
+	Phase         string              `json:"phase"`
+	DrawnCard     int                 `json:"drawnCard"`
+	Pending       *pendingPenalty     `json:"pending,omitempty"`
+	Catchable     string              `json:"catchable,omitempty"`
+	Skipped       []string            `json:"skipped,omitempty"`
+	CurrentColor  string              `json:"currentColor"`
+	DrawPile      []card              `json:"drawPile"`
+	DiscardPile   []card              `json:"discardPile"`
+	Players       []player            `json:"players"`
+	Results       []PlayerResult      `json:"results,omitempty"`
+	WinnerID      string              `json:"winnerId,omitempty"`
+	LastAction    string              `json:"lastAction"`
+	LastEvent     lastEvent           `json:"lastEvent"`
+	BotDifficulty string              `json:"botDifficulty,omitempty"`
+	Lacks         map[string]lackNote `json:"lacks,omitempty"`
+	Rules         gameRules           `json:"rules"`
+	UpdatedAt     string              `json:"updatedAt"`
+	botActing     bool
+}
+
+type PlayerResult struct {
+	Rank           int    `json:"rank"`
+	PlayerID       string `json:"playerId"`
+	Name           string `json:"name"`
+	Bot            bool   `json:"bot"`
+	Winner         bool   `json:"winner"`
+	CardsRemaining int    `json:"cardsRemaining"`
+	HandPoints     int    `json:"handPoints"`
+	PointsEarned   int    `json:"pointsEarned"`
 }
 
 type PublicPlayer struct {
@@ -68,25 +96,59 @@ type PublicPlayer struct {
 	Name      string   `json:"name"`
 	Bot       bool     `json:"bot"`
 	Finished  bool     `json:"finished"`
+	SaidUno   bool     `json:"saidUno"`
 	CardCount int      `json:"cardCount"`
+	HandValue int      `json:"handValue,omitempty"`
 	Hand      []string `json:"hand,omitempty"`
 }
 
-type Snapshot struct {
-	GameID       string         `json:"gameId"`
-	Status       string         `json:"status"`
-	Version      int64          `json:"version"`
-	TurnPlayerID string         `json:"turnPlayerId"`
-	TurnNumber   int            `json:"turnNumber"`
-	CurrentColor string         `json:"currentColor"`
-	TopCard      string         `json:"topCard"`
-	DrawCount    int            `json:"drawCount"`
-	Players      []PublicPlayer `json:"players"`
-	WinnerID     string         `json:"winnerId,omitempty"`
-	LastAction   string         `json:"lastAction"`
+type PublicEvent struct {
+	Type     string `json:"type"`
+	PlayerID string `json:"playerId,omitempty"`
+	TargetID string `json:"targetId,omitempty"`
+	Card     string `json:"card,omitempty"`
+	Color    string `json:"color,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	Jump     bool   `json:"jump,omitempty"`
 }
 
-func NewEngine(database *sql.DB) *Engine { return &Engine{database: database} }
+type Snapshot struct {
+	GameID        string         `json:"gameId"`
+	Status        string         `json:"status"`
+	Version       int64          `json:"version"`
+	TurnPlayerID  string         `json:"turnPlayerId"`
+	TurnNumber    int            `json:"turnNumber"`
+	Direction     int            `json:"direction"`
+	Phase         string         `json:"phase"`
+	PendingDraw   int            `json:"pendingDraw,omitempty"`
+	PendingFromID string         `json:"pendingFromId,omitempty"`
+	Catchable     string         `json:"catchable,omitempty"`
+	Skipped       []string       `json:"skipped,omitempty"`
+	CurrentColor  string         `json:"currentColor"`
+	TopCard       string         `json:"topCard"`
+	DrawCount     int            `json:"drawCount"`
+	Players       []PublicPlayer `json:"players"`
+	Playable      []int          `json:"playable,omitempty"`
+	Results       []PlayerResult `json:"results,omitempty"`
+	WinnerID      string         `json:"winnerId,omitempty"`
+	LastAction    string         `json:"lastAction"`
+	LastEvent     PublicEvent    `json:"lastEvent"`
+	Rules         gameRules      `json:"rules"`
+}
+
+func NewEngine(database *sql.DB) *Engine {
+	return &Engine{database: database, random: rand.New(rand.NewSource(time.Now().UnixNano())), timers: map[string]*botTimers{}, botSpeed: 1}
+}
+
+// Stop cancels every pending bot move. It is safe to call more than once.
+func (engine *Engine) Stop() {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	engine.stopped = true
+	for gameID := range engine.timers {
+		engine.cancelBots(gameID)
+	}
+}
 
 // OnChange registers the callback invoked after every committed mutation.
 func (engine *Engine) OnChange(callback func(Update)) { engine.onChange = callback }
@@ -134,6 +196,7 @@ func (engine *Engine) Start(gameID, userID string) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	engine.emit(state)
+	engine.scheduleBots(state)
 	return publicSnapshot(state, userID), nil
 }
 
@@ -152,59 +215,24 @@ func (engine *Engine) State(gameID, viewerID string) (Snapshot, error) {
 	if err = tx.Commit(); err != nil {
 		return Snapshot{}, err
 	}
+	if _, pending := engine.timers[gameID]; !pending {
+		engine.scheduleBots(state)
+	}
 	return publicSnapshot(state, viewerID), nil
 }
 
 func (engine *Engine) Draw(gameID, userID string) (Snapshot, error) {
-	return engine.mutate(gameID, userID, func(state *gameState, playerIndex int) error {
-		if len(state.DrawPile) == 0 {
-			engine.recycle(state)
-		}
-		if len(state.DrawPile) == 0 {
-			return fmt.Errorf("%w: draw pile is empty", ErrInvalidAction)
-		}
-		state.Players[playerIndex].Hand = append(state.Players[playerIndex].Hand, state.DrawPile[len(state.DrawPile)-1])
-		state.DrawPile = state.DrawPile[:len(state.DrawPile)-1]
-		state.LastAction = "draw"
-		engine.advance(state, playerIndex)
-		return nil
-	})
+	return engine.Act(gameID, userID, Action{Type: ActionDraw})
 }
 
 func (engine *Engine) Play(gameID, userID string, cardIndex int, color string) (Snapshot, error) {
-	return engine.mutate(gameID, userID, func(state *gameState, playerIndex int) error {
-		hand := state.Players[playerIndex].Hand
-		if cardIndex < 0 || cardIndex >= len(hand) {
-			return fmt.Errorf("%w: card index is out of range", ErrInvalidCard)
-		}
-		played := hand[cardIndex]
-		if !canPlay(played.Face, state.CurrentColor, state.DiscardPile[len(state.DiscardPile)-1].Face) {
-			return fmt.Errorf("%w: card does not match the active color or symbol", ErrInvalidCard)
-		}
-		if isWild(played.Face) {
-			color = strings.ToUpper(strings.TrimSpace(color))
-			if color != "R" && color != "G" && color != "B" && color != "Y" {
-				return fmt.Errorf("%w: a color is required for a wild card", ErrInvalidAction)
-			}
-			state.CurrentColor = color
-		} else {
-			state.CurrentColor = colorOf(played.Face)
-		}
-		state.Players[playerIndex].Hand = append(hand[:cardIndex], hand[cardIndex+1:]...)
-		state.DiscardPile = append(state.DiscardPile, played)
-		state.LastAction = "play"
-		if len(state.Players[playerIndex].Hand) == 0 {
-			state.Status = "finished"
-			state.WinnerID = userID
-			state.Players[playerIndex].Finished = true
-			return nil
-		}
-		engine.advance(state, playerIndex)
-		return nil
-	})
+	return engine.Act(gameID, userID, Action{Type: ActionPlay, CardIndex: cardIndex, Color: color})
 }
 
-func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int) error) (Snapshot, error) {
+// Act applies one player action under the official UNO rules and persists the
+// resulting state. Every rule check lives in rules.go so the engine stays the
+// single source of truth for what a player may do.
+func (engine *Engine) Act(gameID, userID string, action Action) (Snapshot, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	tx, err := engine.database.Begin()
@@ -216,50 +244,55 @@ func (engine *Engine) mutate(gameID, userID string, action func(*gameState, int)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	playerIndex := -1
-	for index := range state.Players {
-		if state.Players[index].ID == userID {
-			playerIndex = index
-			break
-		}
-	}
-	if playerIndex < 0 || state.Players[playerIndex].Bot {
-		return Snapshot{}, fmt.Errorf("%w: only a real player can act", ErrInvalidAction)
-	}
 	if state.Status != "active" {
 		return Snapshot{}, ErrGameNotActive
 	}
-	if state.TurnPlayerID != userID {
-		return Snapshot{}, ErrNotYourTurn
+	actorIndex := state.playerIndex(userID)
+	if actorIndex < 0 {
+		return Snapshot{}, ErrNotAPlayer
 	}
-	if err = action(state, playerIndex); err != nil {
+	if err = state.apply(actorIndex, action, engine.random); err != nil {
 		return Snapshot{}, err
 	}
+	if err = engine.commit(tx, state); err != nil {
+		return Snapshot{}, err
+	}
+	return publicSnapshot(state, userID), nil
+}
+
+func (engine *Engine) commit(tx *sql.Tx, state *gameState) error {
 	state.Version++
 	state.TurnNumber++
 	state.UpdatedAt = now()
 	if state.Status == "finished" {
-		if _, err = tx.Exec(`UPDATE games SET status='finished',ended_at=? WHERE id=?`, state.UpdatedAt, gameID); err != nil {
-			return Snapshot{}, err
+		if _, err := tx.Exec(`UPDATE games SET status='finished',ended_at=? WHERE id=?`, state.UpdatedAt, state.GameID); err != nil {
+			return err
 		}
 	}
-	if err = save(tx, state); err != nil {
-		return Snapshot{}, err
+	if err := save(tx, state); err != nil {
+		return err
 	}
-	if err = tx.Commit(); err != nil {
-		return Snapshot{}, err
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 	engine.emit(state)
-	return publicSnapshot(state, userID), nil
+	engine.scheduleBots(state)
+	return nil
 }
 
 func (engine *Engine) loadOrCreate(tx *sql.Tx, gameID string) (*gameState, error) {
 	var encoded string
 	err := tx.QueryRow(`SELECT state_json FROM uno_game_states WHERE game_id=?`, gameID).Scan(&encoded)
 	if err == nil {
-		var state gameState
+		state := gameState{DrawnCard: -1}
 		if err = json.Unmarshal([]byte(encoded), &state); err != nil {
 			return nil, fmt.Errorf("decode uno state: %w", err)
+		}
+		if state.Phase == "" {
+			state.Phase = PhaseTurn
+		}
+		if state.Rules.DrawPenalty == 0 {
+			state.Rules = defaultRules()
 		}
 		var status string
 		if err = tx.QueryRow(`SELECT status FROM games WHERE id=?`, gameID).Scan(&status); err != nil {
@@ -282,20 +315,22 @@ func (engine *Engine) loadOrCreate(tx *sql.Tx, gameID string) (*gameState, error
 	if status != "in_progress" {
 		return nil, ErrGameNotActive
 	}
-	return initialize(tx, gameID)
+	return engine.initialize(tx, gameID)
 }
 
-func initialize(tx *sql.Tx, gameID string) (*gameState, error) {
-	var handSize, maxPlayers, botsEnabled, multipleDecks int
-	if err := tx.QueryRow(`SELECT COALESCE(max_players,4),COALESCE(starting_hand_size,7),COALESCE(bots_enabled,0),COALESCE(allow_multiple_decks,0) FROM game_settings WHERE game_id=?`, gameID).Scan(&maxPlayers, &handSize, &botsEnabled, &multipleDecks); err != nil {
+func (engine *Engine) initialize(tx *sql.Tx, gameID string) (*gameState, error) {
+	var handSize, maxPlayers, botsEnabled, multipleDecks, drawPenalty, stack, jump, sevenZero, drawUntil, forcePlay, challenge int
+	var difficulty string
+	if err := tx.QueryRow(`SELECT COALESCE(max_players,4),COALESCE(starting_hand_size,7),COALESCE(bots_enabled,0),COALESCE(allow_multiple_decks,0),COALESCE(bot_difficulty,'intermediate'),COALESCE(draw_penalty,2),COALESCE(stack_draw_cards,0),COALESCE(jump_in,0),COALESCE(seven_zero,0),COALESCE(draw_until_playable,0),COALESCE(force_play,0),COALESCE(challenge_draw_four,1) FROM game_settings WHERE game_id=?`, gameID).Scan(&maxPlayers, &handSize, &botsEnabled, &multipleDecks, &difficulty, &drawPenalty, &stack, &jump, &sevenZero, &drawUntil, &forcePlay, &challenge); err != nil {
 		return nil, err
 	}
+	rules := gameRules{DrawPenalty: drawPenalty, StackDrawCards: stack != 0, JumpIn: jump != 0, SevenZero: sevenZero != 0, DrawUntilPlayable: drawUntil != 0, ForcePlay: forcePlay != 0, ChallengeDrawFour: challenge != 0}
 	rows, err := tx.Query(`SELECT p.user_id,u.username FROM game_participants p JOIN users u ON u.id=p.user_id JOIN games g ON g.id=p.game_id WHERE p.game_id=? ORDER BY CASE WHEN p.user_id=g.created_by THEN 0 ELSE 1 END,p.user_id`, gameID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	state := &gameState{GameID: gameID, Status: "active", Version: 1, Direction: 1, TurnNumber: 1, UpdatedAt: now()}
+	state := &gameState{GameID: gameID, Status: "active", Version: 1, TurnNumber: 1, UpdatedAt: now(), BotDifficulty: difficulty, Rules: rules}
 	for rows.Next() {
 		var id, name string
 		if err = rows.Scan(&id, &name); err != nil {
@@ -316,29 +351,8 @@ func initialize(tx *sql.Tx, gameID string) (*gameState, error) {
 		}
 	}
 	deck := buildDeck(multipleDecks != 0)
-	random := rand.New(rand.NewSource(time.Now().UnixNano()))
-	random.Shuffle(len(deck), func(left, right int) { deck[left], deck[right] = deck[right], deck[left] })
-	for round := 0; round < handSize; round++ {
-		for index := range state.Players {
-			if len(deck) == 0 {
-				break
-			}
-			state.Players[index].Hand = append(state.Players[index].Hand, deck[len(deck)-1])
-			deck = deck[:len(deck)-1]
-		}
-	}
-	for len(deck) > 0 {
-		candidate := deck[len(deck)-1]
-		deck = deck[:len(deck)-1]
-		if !isWild(candidate.Face) {
-			state.DiscardPile = append(state.DiscardPile, candidate)
-			state.CurrentColor = colorOf(candidate.Face)
-			break
-		}
-		deck = append([]card{candidate}, deck...)
-	}
-	state.DrawPile = deck
-	state.TurnPlayerID = state.Players[0].ID
+	engine.random.Shuffle(len(deck), func(left, right int) { deck[left], deck[right] = deck[right], deck[left] })
+	deal(state, deck, handSize, engine.random)
 	if err = save(tx, state); err != nil {
 		return nil, err
 	}
@@ -354,88 +368,38 @@ func save(tx *sql.Tx, state *gameState) error {
 	return err
 }
 
-func (engine *Engine) recycle(state *gameState) {
-	if len(state.DiscardPile) <= 1 {
-		return
-	}
-	top := state.DiscardPile[len(state.DiscardPile)-1]
-	state.DrawPile = append(state.DrawPile, state.DiscardPile[:len(state.DiscardPile)-1]...)
-	state.DiscardPile = []card{top}
-}
-
-func (engine *Engine) advance(state *gameState, current int) {
-	for step := 1; step <= len(state.Players); step++ {
-		next := (current + state.Direction*step) % len(state.Players)
-		if next < 0 {
-			next += len(state.Players)
-		}
-		if !state.Players[next].Finished {
-			state.TurnPlayerID = state.Players[next].ID
-			return
-		}
-	}
-	state.Status = "finished"
-}
-
 func publicSnapshot(state *gameState, viewerID string) Snapshot {
-	snapshot := Snapshot{GameID: state.GameID, Status: state.Status, Version: state.Version, TurnPlayerID: state.TurnPlayerID, TurnNumber: state.TurnNumber, CurrentColor: state.CurrentColor, DrawCount: len(state.DrawPile), LastAction: state.LastAction, WinnerID: state.WinnerID}
-	if len(state.DiscardPile) > 0 {
-		snapshot.TopCard = state.DiscardPile[len(state.DiscardPile)-1].Face
+	snapshot := Snapshot{
+		GameID: state.GameID, Status: state.Status, Version: state.Version, TurnPlayerID: state.TurnPlayerID, TurnNumber: state.TurnNumber,
+		Direction: state.Direction, Phase: state.Phase, Catchable: state.Catchable, Skipped: state.Skipped, CurrentColor: state.CurrentColor, DrawCount: len(state.DrawPile),
+		Results: state.Results, LastAction: state.LastAction, WinnerID: state.WinnerID, LastEvent: PublicEvent(state.LastEvent), Rules: state.Rules,
 	}
-	for _, current := range state.Players {
-		item := PublicPlayer{ID: current.ID, Name: current.Name, Bot: current.Bot, Finished: current.Finished, CardCount: len(current.Hand)}
+	if state.Pending != nil {
+		snapshot.PendingDraw = state.Pending.Count
+		snapshot.PendingFromID = state.Pending.FromID
+	}
+	if len(state.DiscardPile) > 0 {
+		snapshot.TopCard = state.topCard().Face
+	}
+	for index, current := range state.Players {
+		item := PublicPlayer{ID: current.ID, Name: current.Name, Bot: current.Bot, Finished: current.Finished, SaidUno: current.SaidUno, CardCount: len(current.Hand)}
+		if state.Status == "finished" {
+			item.HandValue = current.HandValue
+		}
 		if current.ID == viewerID && !current.Bot {
 			item.Hand = make([]string, 0, len(current.Hand))
 			for _, card := range current.Hand {
 				item.Hand = append(item.Hand, card.Face)
 			}
+			if state.Status == "active" && state.TurnPlayerID == viewerID {
+				snapshot.Playable = state.playableIndexes(index)
+			} else if state.Status == "active" {
+				snapshot.Playable = state.jumpInIndexes(index)
+			}
 		}
 		snapshot.Players = append(snapshot.Players, item)
 	}
 	return snapshot
-}
-
-func buildDeck(multiple bool) []card {
-	decks := 1
-	if multiple {
-		decks = 2
-	}
-	colors := []string{"R", "G", "B", "Y"}
-	deck := make([]card, 0, decks*108)
-	for set := 0; set < decks; set++ {
-		for _, color := range colors {
-			for value := 0; value <= 9; value++ {
-				deck = append(deck, card{Face: fmt.Sprintf("%s%d", color, value)})
-			}
-			for copy := 0; copy < 2; copy++ {
-				deck = append(deck, card{Face: color + "A2"}, card{Face: color + "R"}, card{Face: color + "S"})
-			}
-		}
-		for copy := 0; copy < 4; copy++ {
-			deck = append(deck, card{Face: "WC"}, card{Face: "W4"})
-		}
-	}
-	return deck
-}
-
-func canPlay(face, color, top string) bool {
-	return isWild(face) || colorOf(face) == color || symbolOf(face) == symbolOf(top)
-}
-
-func isWild(face string) bool { return face == "WC" || face == "W4" }
-
-func colorOf(face string) string {
-	if len(face) == 0 || isWild(face) {
-		return ""
-	}
-	return string(face[0])
-}
-
-func symbolOf(face string) string {
-	if len(face) < 2 {
-		return face
-	}
-	return face[1:]
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }

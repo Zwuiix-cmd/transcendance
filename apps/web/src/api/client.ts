@@ -1,4 +1,4 @@
-import type { ApiError, AuthResponse, Game, GameDetail, GameSettings, LeaderboardEntry, MatchmakingStatus, ProfileSearchResult, QueueMode, UnoSnapshot, User, UserAnalytics } from '../types'
+import type { ApiError, AuthResponse, Game, GameDetail, GameSettings, LeaderboardEntry, MatchmakingStatus, ProfileSearchResult, QueueMode, UnoActionRequest, UnoSnapshot, User, UserAnalytics } from '../types'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1'
 
@@ -127,6 +127,17 @@ class ApiClient {
       method: 'POST',
       body: JSON.stringify({ cardIndex, color: color ?? '' }),
     })
+  }
+
+  unoAction(id: string, action: UnoActionRequest) {
+    const body: Record<string, unknown> = { type: action.type }
+    if (action.type === 'play') {
+      body.cardIndex = action.cardIndex
+      body.color = action.color ?? ''
+      body.uno = Boolean(action.uno)
+    }
+    if (action.type === 'catch' || action.type === 'swap') body.targetId = action.targetId
+    return this.request<UnoSnapshot>(`/games/${encodeURIComponent(id)}/uno/action`, { method: 'POST', body: JSON.stringify(body) })
   }
 
   reconnectGame(id: string) {

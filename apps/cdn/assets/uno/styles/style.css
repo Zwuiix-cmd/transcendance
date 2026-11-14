@@ -55,3 +55,26 @@ canvas {
     opacity: 1;
     transform: translate(-50%, 0);
 }
+
+.prompt {
+    position: fixed;
+    left: 50%;
+    top: 24px;
+    z-index: 2;
+    max-width: min(84vw, 520px);
+    padding: 9px 16px;
+    border-radius: 12px;
+    background: rgba(12, 10, 18, 0.78);
+    color: #f6f2ff;
+    font: 600 13px/1.4 system-ui, sans-serif;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -6px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.prompt.is-visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}

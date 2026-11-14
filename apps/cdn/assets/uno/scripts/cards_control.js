@@ -24,6 +24,9 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
     let restarting = false;
     let winning = false;
     let appliedVersion = null;
+    let playable = null;
+    let catchable = '';
+    let seatIds = [];
     const networkMode = typeof onAction === 'function';
 
     const tableBlocker = new THREE.Mesh(
@@ -496,6 +499,11 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
 
         if (target.userData.owner === myPlayer) {
             selectCard(target);
+        } else if (networkMode && target.userData.owner != null && target.userData.pile == null) {
+            const targetId = seatIds[target.userData.owner];
+            if (!targetId) return;
+            if (lastSnapshot?.phase === 'swap' && lastSnapshot?.turnPlayerId === seatIds[myPlayer]) await onAction({ type: 'swap', targetId });
+            else if (targetId === catchable) await onAction({ type: 'catch', targetId });
         } else if (target.userData.pile === 'discard' && selected) {
             const cardIndex = hands[myPlayer].indexOf(selected);
             if (networkMode) {
@@ -505,7 +513,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
                 await playCard(myPlayer, cardIndex);
             }
         } else if (target.userData.pile === 'draw' && drawPile.length) {
-            if (networkMode) await onAction({ type: 'draw' });
+            if (networkMode) await onAction({ type: lastSnapshot?.phase === 'drawn' && lastSnapshot?.turnPlayerId === seatIds[myPlayer] ? 'pass' : 'draw' });
             else drawCard(myPlayer);
         }
     }
@@ -585,10 +593,38 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
         cards.length = 0;
     }
 
+    let lastSnapshot = null;
+    let pendingStates = Promise.resolve();
+
+    function settle(promise, ms) {
+        return Promise.race([
+            Promise.resolve(promise).catch(() => {}),
+            new Promise((resolve) => setTimeout(resolve, ms)),
+        ]);
+    }
+
     function applyServerState(snapshot) {
         if (!snapshot) return;
         if (snapshot.version != null && snapshot.version === appliedVersion) return;
+        const previous = lastSnapshot;
         appliedVersion = snapshot.version ?? null;
+        lastSnapshot = snapshot;
+        seatIds = (snapshot.players || []).map((player) => player.id);
+        catchable = snapshot.catchable || '';
+        playable = Array.isArray(snapshot.playable) ? new Set(snapshot.playable) : null;
+        pendingStates = pendingStates
+            .then(() => settle(reconcile(previous, snapshot), 8000))
+            .catch(() => {})
+            .then(() => {
+                if (lastSnapshot !== snapshot) return;
+                if (!matchesSnapshot(snapshot)) rebuildTable(snapshot);
+                while (drawPile.length < Math.min(snapshot.drawCount || 0, 30)) addDrawPileCard();
+                syncOwnHand(snapshot);
+                markPlayable();
+            });
+    }
+
+    function rebuildTable(snapshot) {
         clearSceneState();
         const topFace = snapshot.topCard || 'R1';
         const topCard = createCard(discardPileX, 0, topFace, 180);
@@ -600,13 +636,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
         discardPile.push(topCard);
 
         const visibleDrawCards = Math.min(Math.max(snapshot.drawCount || 0, 0), 30);
-        for (let index = 0; index < visibleDrawCards; index += 1) {
-            const card = createCard(drawPileX, 0, 'BACK', 180, index * 0.001);
-            card.scale.setScalar(centralCardScale);
-            card.rotation.x = centralCardRotation;
-            card.userData.pile = 'draw';
-            drawPile.push(card);
-        }
+        for (let index = 0; index < visibleDrawCards; index += 1) addDrawPileCard(index);
 
         (snapshot.players || []).slice(0, hands.length).forEach((player, id) => {
             if (player.finished) return;
@@ -614,6 +644,118 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
                 ? player.hand
                 : Array.from({ length: player.cardCount || 0 }, () => 'BACK');
             displayDeck(id, deck);
+        });
+    }
+
+    function addDrawPileCard(index = drawPile.length) {
+        const card = createCard(drawPileX, 0, 'BACK', 180, index * 0.001);
+        card.scale.setScalar(centralCardScale);
+        card.rotation.x = centralCardRotation;
+        card.userData.pile = 'draw';
+        drawPile.push(card);
+        return card;
+    }
+
+    function seatOf(snapshot, playerId) {
+        const index = (snapshot.players || []).findIndex((player) => player.id === playerId);
+        return index >= 0 && index < hands.length ? index : -1;
+    }
+
+    async function reconcile(previous, snapshot) {
+        const event = snapshot.lastEvent || {};
+        const sameTable = previous
+            && previous.status === 'active'
+            && previous.players?.length === snapshot.players?.length
+            && snapshot.version === previous.version + 1
+            && event.type !== 'start';
+        if (!sameTable) {
+            rebuildTable(snapshot);
+            return;
+        }
+        if (event.type === 'play' || event.type === 'finish' || event.type === 'rotate') {
+            const seat = seatOf(snapshot, event.playerId);
+            if (seat >= 0 && hands[seat].length) await settle(animatePlay(seat, event.card, event.color), event.type === 'finish' ? 6000 : 1200);
+        }
+        if (event.type === 'rotate' || event.type === 'swap') {
+            rebuildTable(snapshot);
+            return;
+        }
+        for (let seat = 0; seat < hands.length && seat < snapshot.players.length; seat += 1) {
+            const player = snapshot.players[seat];
+            if (player.finished && event.type !== 'finish') continue;
+            const missing = (player.cardCount || 0) - hands[seat].length;
+            if (missing < 0) throw new Error('hand shrank unexpectedly');
+            const faces = seat === myPlayer && Array.isArray(player.hand) ? player.hand.slice(player.hand.length - missing) : [];
+            for (let index = 0; index < missing; index += 1) {
+                if (!drawPile.length) addDrawPileCard();
+                if (seat === myPlayer) drawPile.at(-1).userData.face = faces[index] || 'BACK';
+                await settle(drawCard(seat), 600);
+            }
+        }
+        syncPiles(previous, snapshot);
+    }
+
+    async function animatePlay(seat, face, color) {
+        const hand = hands[seat];
+        let cardIndex = hand.indexOf(selected);
+        if (seat !== myPlayer || cardIndex < 0 || hand[cardIndex].userData.face !== face) {
+            cardIndex = hand.findIndex((card) => card.userData.face === face);
+        }
+        if (cardIndex < 0) cardIndex = hand.length - 1;
+        const card = hand[cardIndex];
+        card.userData.face = face;
+        if (isWild(card)) card.userData.chosenColor = color || card.userData.chosenColor || 'R';
+        await playCard(seat, cardIndex, isWild(card) ? card.userData.chosenColor : null);
+    }
+
+    function syncPiles(previous, snapshot) {
+        const recycled = (snapshot.drawCount || 0) > (previous?.drawCount || 0);
+        while (recycled && discardPile.length > 1) {
+            const moved = discardPile.shift();
+            moved.userData.pile = 'draw';
+            moved.material.map = cardTexture('BACK');
+            moved.position.set(drawPileX, tableHeight + drawPile.length * 0.001, 0);
+            moved.rotation.set(Math.PI / 2, Math.PI, THREE.MathUtils.degToRad(180));
+            drawPile.unshift(moved);
+        }
+        while (drawPile.length > Math.max(snapshot.drawCount || 0, 0)) {
+            const extra = drawPile.shift();
+            if (extra.userData.hitArea) scene.remove(extra.userData.hitArea);
+            scene.remove(extra);
+            cards.splice(cards.indexOf(extra), 1);
+        }
+        const top = discardPile.at(-1);
+        if (top && isWild(top) && snapshot.currentColor)
+            top.material.map = cardTexture(`${top.userData.face}_${snapshot.currentColor}`);
+    }
+
+    function matchesSnapshot(snapshot) {
+        const top = discardPile.at(-1);
+        if (!top || top.userData.face !== snapshot.topCard) return false;
+        return (snapshot.players || []).slice(0, hands.length).every((player, seat) =>
+            (player.finished && snapshot.status === 'finished') || hands[seat].length === (player.cardCount || 0));
+    }
+
+    function syncOwnHand(snapshot) {
+        if (myPlayer < 0) return;
+        const faces = snapshot.players?.[myPlayer]?.hand;
+        if (!Array.isArray(faces)) return;
+        hands[myPlayer].forEach((card, index) => {
+            const face = faces[index];
+            if (!face || card.userData.face === face) return;
+            card.userData.face = face;
+            card.userData.chosenColor = null;
+            card.userData.previewColor = null;
+            card.material.map = cardTexture(face);
+        });
+    }
+
+    function markPlayable() {
+        if (myPlayer < 0 || !hands[myPlayer]) return;
+        hands[myPlayer].forEach((card, index) => {
+            const allowed = !playable || playable.has(index);
+            card.userData.playable = allowed;
+            card.material.color.setScalar(allowed ? 1 : 0.42);
         });
     }
 

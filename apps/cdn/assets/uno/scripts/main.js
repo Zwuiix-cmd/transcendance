@@ -2,11 +2,11 @@ import * as THREE from 'three';
 import { createWorldControl } from './world_control.js?v=radial-table-20261105-v10';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { HDRLoader } from 'three/addons/loaders/HDRLoader.js';
-import { createCardsControl } from './cards_control.js?v=radial-table-20261105-v21';
-import { createPlayerHeads } from './player_heads.js?v=radial-table-20261105-v21';
-import { createVolumeRenderer } from './volume_shaders.js';
-import { createFog } from './create_fog.js';
-import { createCardTrail } from './card_trail.js';
+import { createCardsControl } from './cards_control.js?v=rules-20261114-v29';
+import { createPlayerHeads } from './player_heads.js?v=shaders-20261114-v30';
+import { createVolumeRenderer } from './volume_shaders.js?v=shaders-20261114-v30';
+import { createFog } from './create_fog.js?v=shaders-20261114-v30';
+import { createCardTrail } from './card_trail.js?v=shaders-20261114-v30';
 
 const query = new URLSearchParams(window.location.search);
 const gameID = query.get('gameId')?.trim() || '';
@@ -19,6 +19,7 @@ const tableRadius = 1.15 + Math.max(0, seatCount - 4) * 0.035;
 
 function createNotice() {
     const element = document.querySelector('.notice');
+    const prompt = document.querySelector('.prompt');
     let timer = 0;
     return {
         show(text) {
@@ -27,6 +28,83 @@ function createNotice() {
             element.classList.add('is-visible');
             window.clearTimeout(timer);
             timer = window.setTimeout(() => element.classList.remove('is-visible'), 2600);
+        },
+        hold(text) {
+            if (!prompt) return;
+            prompt.textContent = text || '';
+            prompt.classList.toggle('is-visible', Boolean(text));
+        },
+    };
+}
+
+const cardLabels = { S: 'Skip', R: 'Reverse', A2: '+2', WC: 'Wild', W4: 'Wild +4' };
+const colorLabels = { R: 'red', G: 'green', B: 'blue', Y: 'yellow' };
+function describeCard(face) {
+    if (!face) return 'a card';
+    if (face === 'WC' || face === 'W4') return cardLabels[face];
+    const symbol = face.slice(1);
+    return `${colorLabels[face[0]] || ''} ${cardLabels[symbol] || symbol}`.trim();
+}
+
+function createRuleFeedback(viewerID) {
+    let lastEventVersion = null;
+    const nameOf = (snapshot, id) => (id === viewerID ? 'You' : snapshot.players?.find((player) => player.id === id)?.name || 'A player');
+    const eventMessage = (snapshot) => {
+        const event = snapshot.lastEvent;
+        if (!event?.type) return '';
+        const actor = nameOf(snapshot, event.playerId);
+        const target = nameOf(snapshot, event.targetId);
+        switch (event.type) {
+            case 'start': return `The round opens with ${describeCard(event.card)}.`;
+            case 'play': {
+                const verb = event.jump ? 'jumped in with' : 'played';
+                if (!event.targetId) return `${actor} ${verb} ${describeCard(event.card)}${event.color && (event.card === 'WC' || event.card === 'W4') ? `, color is now ${colorLabels[event.color]}` : ''}.`;
+                if (!event.count) return `${actor} ${verb} ${describeCard(event.card)}: ${target} skip${event.targetId === viewerID ? '' : 's'} a turn.`;
+                const pending = snapshot.phase === 'penalty' || snapshot.phase === 'challenge';
+                return `${actor} ${verb} ${describeCard(event.card)}${event.color ? ` (${colorLabels[event.color]})` : ''}: ${target} ${pending ? `face${event.targetId === viewerID ? '' : 's'} +${event.count}` : `draw${event.targetId === viewerID ? '' : 's'} ${event.count}`}.`;
+            }
+            case 'rotate': return `${actor} played ${describeCard(event.card)}: every hand moves to the next player!`;
+            case 'swap': return `${actor} swapped hands with ${target}.`;
+            case 'draw': return event.count > 1 ? `${actor} drew ${event.count} cards.` : `${actor} drew a card.`;
+            case 'pass': return `${actor} passed.`;
+            case 'accept': return `${actor} drew ${event.count} cards.`;
+            case 'challenge_won': return `${actor} caught a bluff: ${target} draws ${event.count}.`;
+            case 'challenge_lost': return `${actor} lost the challenge and draws ${event.count}.`;
+            case 'uno': return `${actor} called UNO!`;
+            case 'catch': return `${actor} caught ${target} without UNO: +${event.count} cards.`;
+            case 'finish': return `${actor} won the round with ${event.count} points.`;
+            default: return '';
+        }
+    };
+    const promptMessage = (snapshot) => {
+        if (snapshot.status === 'finished') return `${nameOf(snapshot, snapshot.winnerId)} won the round.`;
+        const me = snapshot.players?.find((player) => player.id === viewerID);
+        if (!me) return '';
+        if (snapshot.catchable && snapshot.catchable !== viewerID) return `${nameOf(snapshot, snapshot.catchable)} forgot to call UNO. Click their hand to catch them.`;
+        if (snapshot.turnPlayerId !== viewerID) {
+            if (snapshot.catchable === viewerID) return 'You forgot UNO! Press U before someone catches you.';
+            return snapshot.rules?.jumpIn && (snapshot.playable || []).length ? 'Jump-in! You hold the same card: play it now to steal the turn.' : '';
+        }
+        const stackHint = snapshot.rules?.stackDrawCards && (snapshot.playable || []).length ? ', or stack a draw card from your hand' : '';
+        if (snapshot.phase === 'challenge') return `Wild +4 from ${nameOf(snapshot, snapshot.pendingFromId)}: Enter to draw ${snapshot.pendingDraw || 4}, C to challenge${stackHint}.`;
+        if (snapshot.phase === 'penalty') return `+${snapshot.pendingDraw || 2} from ${nameOf(snapshot, snapshot.pendingFromId)}: press Enter to draw${stackHint}.`;
+        if (snapshot.phase === 'swap') return 'You played a 7: click another player\'s hand to swap hands with them.';
+        if (snapshot.phase === 'drawn') return snapshot.rules?.forcePlay ? 'Your drawn card fits and force play is on: play it.' : 'Your drawn card fits: play it, or click the draw pile again (or press Space) to pass.';
+        if (me.cardCount === 2) return 'Your turn. Press U to call UNO before playing your second-to-last card.';
+        if (snapshot.catchable === viewerID) return 'You forgot UNO! Press U before someone catches you.';
+        return (snapshot.playable || []).length ? 'Your turn.' : 'Your turn: no playable card, click the draw pile.';
+    };
+    return {
+        apply(snapshot) {
+            if (!snapshot) return;
+            if (snapshot.version != null && snapshot.version !== lastEventVersion) {
+                lastEventVersion = snapshot.version;
+                const skipped = (snapshot.skipped || []).map((id) => nameOf(snapshot, id));
+                const message = eventMessage(snapshot);
+                if (skipped.length) notice.show(`${message} ${skipped.join(', ')} ${skipped.length > 1 || skipped[0] === 'You' ? 'have' : 'has'} no playable card and nothing to draw: turn skipped.`.trim());
+                else if (message) notice.show(message);
+            }
+            notice.hold(promptMessage(snapshot));
         },
     };
 }
@@ -91,6 +169,11 @@ function createParentBridge() {
 
 const notice = createNotice();
 const bridge = networkMode ? createParentBridge() : null;
+const reportProgress = (stage, ratio) => {
+    if (!networkMode) return;
+    window.parent.postMessage({ type: 'uno.progress', stage, ratio }, window.location.origin);
+};
+reportProgress('connecting', 0.05);
 let initialUnoState = null;
 let viewerID = query.get('playerId')?.trim() || '';
 if (bridge) {
@@ -153,7 +236,9 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.clear();
 
 const scene = new THREE.Scene();
+reportProgress('lighting', 0.15);
 await createWorldControl(scene);
+reportProgress('table', 0.35);
 await addRoundTable(scene, seatCount);
 
 new HDRLoader().load(
@@ -215,7 +300,7 @@ const requestUnoAction = async (action) => {
     if (actionBusy || !bridge) return;
     actionBusy = true;
     try {
-        await bridge.action(action.type === 'draw' ? { type: 'draw' } : { type: 'play', cardIndex: action.cardIndex, color: action.color || null });
+        await bridge.action(action.type === 'play' ? { type: 'play', cardIndex: action.cardIndex, color: action.color || null } : action);
     } catch (error) {
         notice.show(error.message);
     } finally {
@@ -226,7 +311,9 @@ const {
     preloadCardTextures, createCard, displayDeck, hands, drawPile, discardPile,
     clickCard, updateHover, clearHover,
 } = cardsControl = createCardsControl(scene, camera, canvas, myPlayer, cardEffects, seatCount, startingHandSize, roundTable, networkMode ? requestUnoAction : null);
+reportProgress('cards', 0.55);
 await preloadCardTextures(renderer);
+reportProgress('players', 0.75);
 
 canvas.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -331,20 +418,38 @@ const volumes = createVolumeRenderer(renderer, scene, sunlight);
 const headDisplay = await createPlayerHeads(volumes, scene, myPlayer, seatCount, roundTable);
 const fog = await createFog(volumes);
 const cardTrail = await createCardTrail(renderer, volumes);
+reportProgress('ready', 0.95);
+let firstFrameReported = false;
 Object.assign(cardEffects, cardTrail);
 function syncHeads(snapshot) {
     if (!snapshot || !headDisplay.setActive) return;
     snapshot.players?.forEach((player, index) => headDisplay.setActive(index, !player.finished));
 }
 
+const ruleFeedback = networkMode ? createRuleFeedback(viewerID) : null;
 if (initialUnoState) {
     cardsControl.applyServerState(initialUnoState);
     syncHeads(initialUnoState);
+    ruleFeedback?.apply(initialUnoState);
 }
 
 bridge?.onState((snapshot) => {
     cardsControl.applyServerState(snapshot);
     syncHeads(snapshot);
+    ruleFeedback?.apply(snapshot);
+    if (snapshot?.status === 'finished' && document.pointerLockElement === canvas) {
+        window.setTimeout(() => document.exitPointerLock(), 3000);
+    }
+});
+
+const actionKeys = { ' ': 'pass', enter: 'accept', c: 'challenge', u: 'uno' };
+window.addEventListener('keydown', (event) => {
+    if (!networkMode || spectatorMode || myPlayer < 0 || event.repeat) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const type = actionKeys[event.key.toLowerCase()];
+    if (!type) return;
+    event.preventDefault();
+    void requestUnoAction({ type });
 });
 
 let shaderOn = true;
@@ -358,6 +463,11 @@ window.addEventListener('keydown', (event) => {
 const movement = new THREE.Vector3();
 let previousTime = 0;
 renderer.setAnimationLoop((milliseconds) => {
+    if (!firstFrameReported) {
+        firstFrameReported = true;
+        reportProgress('ready', 1);
+        if (networkMode) window.parent.postMessage({ type: 'uno.scene.ready' }, window.location.origin);
+    }
     const t = milliseconds / 1000;
     const delta = Math.min(t - previousTime, 0.05);
     previousTime = t;

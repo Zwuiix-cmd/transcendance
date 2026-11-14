@@ -11,6 +11,7 @@ import (
 	"card-arena/api/internal/api/v1/games/id/result"
 	"card-arena/api/internal/api/v1/games/id/spectate"
 	"card-arena/api/internal/api/v1/games/id/status"
+	"card-arena/api/internal/api/v1/games/id/uno/action"
 	"card-arena/api/internal/api/v1/games/id/uno/draw"
 	"card-arena/api/internal/api/v1/games/id/uno/play"
 	"card-arena/api/internal/api/v1/games/id/uno/start"
@@ -35,6 +36,7 @@ func Definitions() []route.RegisteredRoute {
 		start.Definition,
 		draw.Definition,
 		play.Definition,
+		action.Definition,
 		rotate.Definition,
 		whitelist.Definition,
 		whitelistuser.Definition,

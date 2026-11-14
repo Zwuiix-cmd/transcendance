@@ -3,13 +3,14 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { ApiClientError, api } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { LoadingState, UserAvatar } from '../components/ui'
+import { UnoLoadingScreen } from '../components/UnoLoadingScreen'
 import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
 import type { GameDeletedEvent, GameDetail, UnoActionRequest, UnoSnapshot } from '../types'
 import { requestErrorMessage } from '../utils/errors'
 import './uno-game.css'
 
 const UNO_GAME_ASSET_PATH = '/files/uno/index.html'
-const UNO_GAME_ASSET_VERSION = 'realtime-20261110-v22'
+const UNO_GAME_ASSET_VERSION = 'rules-20261114-v30'
 const BOT_NAMES = ['Nova', 'Pixel', 'Orbit', 'Mochi', 'Rook', 'Echo', 'Ziggy', 'Comet', 'Miso', 'Vega', 'Tango', 'Kairo']
 const BOT_COLORS = ['#a78bfa', '#f0abfc', '#c4b5fd', '#93c5fd', '#f9a8d4', '#86efac', '#fcd34d', '#fdba74']
 
@@ -40,6 +41,8 @@ function botNameOrder(matchID: string) {
 
 type FrameMessage =
   | { type: 'uno.ready' }
+  | { type: 'uno.progress'; stage: string; ratio: number }
+  | { type: 'uno.scene.ready' }
   | { type: 'uno.action'; id: number; action: UnoActionRequest }
 
 function newerSnapshot(current: UnoSnapshot | null, next: UnoSnapshot) {
@@ -66,6 +69,21 @@ export function UnoGamePage() {
   const spectatorMode = searchParams.get('spectate') === '1'
   const [game, setGame] = useState<GameDetail | null>(null)
   const [unoState, setUnoState] = useState<UnoSnapshot | null>(null)
+  const [sceneProgress, setSceneProgress] = useState({ stage: 'joining', ratio: 0 })
+  const [sceneReady, setSceneReady] = useState(false)
+  const [loaderGone, setLoaderGone] = useState(false)
+  const [loaderStalled, setLoaderStalled] = useState(false)
+  useEffect(() => {
+    if (!sceneReady) return undefined
+    const timer = window.setTimeout(() => setLoaderGone(true), 800)
+    return () => window.clearTimeout(timer)
+  }, [sceneReady])
+  useEffect(() => {
+    if (sceneReady || loaderGone) return undefined
+    setLoaderStalled(false)
+    const timer = window.setTimeout(() => setLoaderStalled(true), 20000)
+    return () => window.clearTimeout(timer)
+  }, [loaderGone, sceneProgress.stage, sceneReady])
   const [loading, setLoading] = useState(Boolean(gameID))
   const [error, setError] = useState('')
   const [accessGranted, setAccessGranted] = useState(!gameID)
@@ -128,13 +146,28 @@ export function UnoGamePage() {
 
   const runAction = useCallback(async (id: number, action: UnoActionRequest) => {
     try {
-      const snapshot = action.type === 'draw' ? await api.drawUnoCard(gameID) : await api.playUnoCard(gameID, action.cardIndex, action.color)
+      const snapshot = await api.unoAction(gameID, action)
       applySnapshot(snapshot)
       postToFrame({ type: 'uno.action.result', id, ok: true })
     } catch (requestError) {
       postToFrame({ type: 'uno.action.result', id, ok: false, message: requestErrorMessage(requestError, 'The table refused this move.') })
     }
   }, [applySnapshot, gameID, postToFrame])
+
+  const [panelBusy, setPanelBusy] = useState(false)
+  const [panelError, setPanelError] = useState('')
+  const panelAction = useCallback(async (action: UnoActionRequest) => {
+    if (panelBusy) return
+    setPanelBusy(true)
+    setPanelError('')
+    try {
+      applySnapshot(await api.unoAction(gameID, action))
+    } catch (requestError) {
+      setPanelError(requestErrorMessage(requestError, 'The table refused this move.'))
+    } finally {
+      setPanelBusy(false)
+    }
+  }, [applySnapshot, gameID, panelBusy])
 
   useEffect(() => {
     if (!accessGranted || !gameID) return undefined
@@ -146,6 +179,8 @@ export function UnoGamePage() {
         const { game: currentGame, unoState: snapshot, user: viewer } = latest.current
         postToFrame({ type: 'uno.bootstrap', gameId: gameID, spectator: spectatorMode, player: viewer ? { id: viewer.id, username: viewer.username, avatarUrl: viewer.avatarUrl } : null, game: currentGame, snapshot })
       }
+      if (data.type === 'uno.progress' && typeof data.stage === 'string') setSceneProgress({ stage: data.stage, ratio: typeof data.ratio === 'number' ? data.ratio : 0 })
+      if (data.type === 'uno.scene.ready') setSceneReady(true)
       if (data.type === 'uno.action' && typeof data.id === 'number' && data.action && !spectatorMode) void runAction(data.id, data.action)
     }
     window.addEventListener('message', onMessage)
@@ -159,6 +194,38 @@ export function UnoGamePage() {
   const currentGame = game?.game
   const participants = game?.participants ?? []
   const spectators = game?.spectators ?? []
+  const [showResults, setShowResults] = useState(false)
+  useEffect(() => {
+    if (unoState?.status !== 'finished') {
+      setShowResults(false)
+      return undefined
+    }
+    const timer = window.setTimeout(() => setShowResults(true), 3200)
+    return () => window.clearTimeout(timer)
+  }, [unoState?.status])
+  const results = useMemo(() => {
+    if (!unoState || unoState.status !== 'finished' || !unoState.results?.length) return null
+    return unoState.results.map((result) => ({
+      ...result,
+      displayName: result.playerId === user?.id ? `${result.name} (you)` : result.name,
+      points: result.winner ? result.pointsEarned : -result.handPoints,
+    }))
+  }, [unoState, user?.id])
+  const rules = unoState?.rules ?? currentGame?.settings ?? null
+  const houseRules = useMemo(() => {
+    if (!rules) return []
+    const active: string[] = []
+    if (rules.drawPenalty !== 2) active.push(`+${rules.drawPenalty} draw penalty`)
+    if (rules.stackDrawCards) active.push('Stacking')
+    if (rules.jumpIn) active.push('Jump-in')
+    if (rules.sevenZero) active.push('Seven-zero')
+    if (rules.drawUntilPlayable) active.push('Draw until playable')
+    if (rules.forcePlay) active.push('Force play')
+    if (!rules.challengeDrawFour) active.push('No +4 challenge')
+    return active
+  }, [rules])
+  const myPending = Boolean(!spectatorMode && user && unoState?.status === 'active' && unoState.turnPlayerId === user.id && (unoState.phase === 'challenge' || unoState.phase === 'penalty'))
+  const mySwap = Boolean(!spectatorMode && user && unoState?.status === 'active' && unoState.turnPlayerId === user.id && unoState.phase === 'swap')
   const seatCount = Math.min(8, currentGame?.settings.botsEnabled ? currentGame.settings.maxPlayers : Math.max(participants.length, 1))
   const handSize = currentGame?.settings.startingHandSize ?? 7
   const orderedBotNames = useMemo(() => botNameOrder(gameID), [gameID])
@@ -197,6 +264,15 @@ export function UnoGamePage() {
     }
     return players
   }, [currentGame?.createdBy, currentGame?.settings.botsEnabled, gameID, orderedBotNames, participants, seatCount, unoState, user])
+  const turnLabel = useMemo(() => {
+    if (!unoState) return 'Game state is managed by the table'
+    const nameOf = (id?: string) => tablePlayers.find((player) => player.userId === id)?.username ?? 'player'
+    if (unoState.status === 'finished') return `Winner: ${nameOf(unoState.winnerId)} (+${unoState.results?.[0]?.pointsEarned ?? 0} pts)`
+    if (unoState.phase === 'challenge' || unoState.phase === 'penalty') return `${nameOf(unoState.turnPlayerId)} faces a +${unoState.pendingDraw ?? 4} from ${nameOf(unoState.pendingFromId)}`
+    if (unoState.phase === 'swap') return `${nameOf(unoState.turnPlayerId)} picks a player to swap hands with`
+    if (unoState.phase === 'drawn') return `${nameOf(unoState.turnPlayerId)} drew a playable card`
+    return `Turn: ${nameOf(unoState.turnPlayerId)}${unoState.direction < 0 ? ' (reversed)' : ''}`
+  }, [tablePlayers, unoState])
 
   const frameSrc = useMemo(() => {
     const query = new URLSearchParams()
@@ -211,9 +287,31 @@ export function UnoGamePage() {
 
   return <main className="uno-game-page">
     {error ? <p className="uno-game-warning">{error}</p> : null}
-    {loading ? <div className="uno-game-loading"><LoadingState label="Loading match" /></div> : null}
+    {loading && loaderGone ? <div className="uno-game-loading"><LoadingState label="Loading match" /></div> : null}
+    {!loaderGone && (loading || accessGranted) ? <UnoLoadingScreen stage={accessGranted ? sceneProgress.stage : 'joining'} ratio={accessGranted ? Math.max(sceneProgress.ratio, 0.05) : 0.02} seats={tablePlayers} difficulty={currentGame?.settings.botDifficulty} spectator={spectatorMode} leaving={sceneReady} stalled={loaderStalled} onSkip={() => setLoaderGone(true)} /> : null}
     {accessGranted ? <>
-        <iframe ref={frameRef} className="uno-game-frame" title="Uno 3D game" src={frameSrc} allow="fullscreen; pointer-lock" />
+        <iframe ref={frameRef} className="uno-game-frame" title="Uno 3D game" src={frameSrc} allow="fullscreen" />
+      {myPending && unoState ? <section className="uno-action-panel" aria-label="Draw penalty">
+        <div className="uno-action-copy">
+          <span className="uno-game-overlay-eyebrow">{unoState.phase === 'challenge' ? 'Wild Draw Four' : 'Draw penalty'}</span>
+          <strong>{tablePlayers.find((player) => player.userId === unoState.pendingFromId)?.username ?? 'A player'} hit you with a +{unoState.pendingDraw ?? 4}</strong>
+          <span>{unoState.phase === 'challenge' ? 'Draw the cards, or challenge if you think they still held the previous color.' : 'Draw the cards to end your turn.'}{unoState.rules?.stackDrawCards ? ' You can also stack a matching draw card from your hand.' : ''}</span>
+          {panelError ? <span className="uno-action-error" role="alert">{panelError}</span> : null}
+        </div>
+        <div className="uno-action-buttons">
+          <button className="uno-action-button is-secondary" type="button" onClick={() => void panelAction({ type: 'accept' })} disabled={panelBusy}>Draw {unoState.pendingDraw ?? 4}</button>
+          {unoState.phase === 'challenge' ? <button className="uno-action-button" type="button" onClick={() => void panelAction({ type: 'challenge' })} disabled={panelBusy}>{panelBusy ? 'Challenging…' : 'Challenge +4'}</button> : null}
+        </div>
+      </section> : null}
+      {mySwap ? <section className="uno-action-panel" aria-label="Hand swap">
+        <div className="uno-action-copy">
+          <span className="uno-game-overlay-eyebrow">Seven-zero</span>
+          <strong>You played a 7: pick who you swap hands with</strong>
+          {panelError ? <span className="uno-action-error" role="alert">{panelError}</span> : null}
+        </div>
+        <div className="uno-action-buttons">{tablePlayers.filter((player) => player.userId !== user?.id && !player.finished).map((player) => <button key={player.userId} className="uno-action-button is-secondary" type="button" onClick={() => void panelAction({ type: 'swap', targetId: player.userId })} disabled={panelBusy}>{player.username} · {player.cardCount}</button>)}</div>
+      </section> : null}
+
       <section className="uno-game-overlay" aria-label="Match information">
         <div className="uno-game-overlay-header">
           <div className="uno-game-header-meta">{gameID ? <span>#{gameID.slice(0, 8)}</span> : null}</div>
@@ -228,8 +326,17 @@ export function UnoGamePage() {
             <div><span>Turn limit</span><strong>{currentGame ? `${currentGame.turnTimeLimit}s` : '—'}</strong></div>
           </div>
           <div className="uno-game-roster"><span className="uno-game-overlay-eyebrow">At the table</span><div className="uno-game-roster-list">{tablePlayers.length > 0 ? tablePlayers.map((player) => <span className="uno-game-roster-player" key={player.userId}><UserAvatar username={player.username} avatarUrl={player.avatarUrl} className="uno-game-roster-avatar" />{player.username}{player.bot ? <small>Bot</small> : player.host ? <small>Host</small> : null}</span>) : <span className="uno-game-muted">Waiting for players</span>}</div></div>
-          <div className="uno-game-info-footer"><span>Round</span><strong>{unoState?.turnNumber ?? '—'}</strong><span className="uno-game-muted">{unoState?.turnPlayerId ? `Turn: ${tablePlayers.find((player) => player.userId === unoState.turnPlayerId)?.username ?? 'player'}` : 'Game state is managed by the table'}</span></div>
+          <div className="uno-game-info-footer"><span>Round</span><strong>{unoState?.turnNumber ?? '—'}</strong><span className="uno-game-muted">{turnLabel}</span></div>
+          <div className="uno-game-rules"><span className="uno-game-overlay-eyebrow">{houseRules.length ? 'House rules on this table' : 'Official rules'}</span>{houseRules.length ? <div className="uno-game-rules-pills">{houseRules.map((rule) => <span key={rule}>{rule}</span>)}</div> : null}<ul><li>Match the color, the number or the symbol, or play a Wild.</li><li>Draw one card if you cannot play. If it fits, play it, or click the pile again to pass.</li><li>+2 and Skip hit the next player. Reverse flips the order, and acts as a Skip with two players.</li><li>Wild +4: the target presses Enter to draw, or C to challenge a bluff.</li><li>Press U to call UNO on your second-to-last card, or click a forgetful player's hand to catch them (+2).</li></ul></div>
         </aside>
+
+        {showResults && results ? <div className="uno-game-results" role="dialog" aria-label="Round results">
+          <span className="uno-game-overlay-eyebrow">Round over</span>
+          <h2>{results[0].playerId === user?.id ? 'You won the round!' : `${results[0].name} wins the round`}</h2>
+          <ol className="uno-game-results-list">{results.map((player) => <li key={player.playerId} className={player.winner ? 'is-winner' : undefined}><span className="uno-game-results-rank">{player.rank}</span><span className="uno-game-results-name">{player.displayName}{player.bot ? <small>Bot</small> : null}</span><span className="uno-game-results-cards">{player.winner ? 'UNO out' : `${player.cardsRemaining} card${player.cardsRemaining === 1 ? '' : 's'} left`}</span><strong className="uno-game-results-points">{player.points > 0 ? `+${player.points}` : player.points} pts</strong></li>)}</ol>
+          <div className="uno-game-results-actions"><Link className="button" to="/games">Back to tables</Link><Link className="button button-secondary" to="/dashboard">Home</Link></div>
+        </div> : null}
+        {unoState?.status === 'finished' && !showResults ? <div className="uno-game-results-shortcut"><Link className="button button-secondary" to="/games">Back to tables</Link></div> : null}
 
         <div className="uno-game-spectator-bar"><span className="uno-game-overlay-eyebrow">Spectators</span>{spectators.length > 0 ? <strong>{spectators.map((spectator) => spectator.username).join(', ')}</strong> : <span className="uno-game-muted">None yet</span>}</div>
       </section>

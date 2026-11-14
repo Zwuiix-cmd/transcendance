@@ -166,9 +166,18 @@ account, only whitelisted accounts and the host may join. New accounts start at 
 
 Ranked and unranked are queue modes. Only a completed ranked game can affect ELO; unranked and
 custom games never change the rating. Custom games do not enter the matchmaking queue. Their full
-table configuration, including the optional `botsEnabled` flag, is stored with the lobby and
+table configuration, including the optional `botsEnabled` flag and its `botDifficulty` (`easy`,
+`intermediate` or `expert`, each with its own server-side playing style), is stored with the lobby and
 consumed by the Uno engine. A custom-game owner can launch alone when bots are enabled; when bots
 are disabled, the server requires at least two human participants before starting the game.
+
+The engine plays the official Mattel rules by default and enforces every optional house rule stored
+with the table: configurable `drawPenalty` for +2 cards, `stackDrawCards` (+2 on +2, +4 on anything,
+the whole stack lands on whoever accepts), `jumpIn` (an identical card may be played out of turn),
+`sevenZero` (a 7 lets the player pick a hand to swap with, a 0 rotates every hand in play direction),
+`drawUntilPlayable`, `forcePlay` (the drawn card must be played) and `challengeDrawFour` (off means a
++4 resolves immediately). Bots follow the same options. A finished snapshot carries a ranked
+`results` list with cards remaining, hand points and the winner's points earned.
 
 The internal game service submits a result with `X-Game-Service-Key`, configured through
 `GAME_SERVICE_KEY`. A result must contain every participant exactly once, with contiguous

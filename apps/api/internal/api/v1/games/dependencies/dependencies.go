@@ -113,7 +113,7 @@ type ScannedGame struct {
 func ScanGame(scanner SQLScanner) (ScannedGame, error) {
 	var game ScannedGame
 	var stack, jump, seven, draw, force, challenge, multiple, bots int
-	err := scanner.Scan(&game.ID, &game.Status, &game.CreatedBy, &game.CreatorUsername, &game.CreatedAt, &game.StartedAt, &game.EndedAt, &game.TurnTimeLimit, &game.Mode, &game.PrivateGame, &game.JoinCode, &game.Settings.MaxPlayers, &game.Settings.StartingHandSize, &game.Settings.DrawPenalty, &stack, &jump, &seven, &draw, &force, &challenge, &multiple, &bots, &game.ParticipantCount, &game.Joined, &game.Spectating, &game.SpectatorCount, &game.WhitelistCount)
+	err := scanner.Scan(&game.ID, &game.Status, &game.CreatedBy, &game.CreatorUsername, &game.CreatedAt, &game.StartedAt, &game.EndedAt, &game.TurnTimeLimit, &game.Mode, &game.PrivateGame, &game.JoinCode, &game.Settings.MaxPlayers, &game.Settings.StartingHandSize, &game.Settings.DrawPenalty, &stack, &jump, &seven, &draw, &force, &challenge, &multiple, &bots, &game.Settings.BotDifficulty, &game.ParticipantCount, &game.Joined, &game.Spectating, &game.SpectatorCount, &game.WhitelistCount)
 	game.Settings.StackDrawCards = stack != 0
 	game.Settings.JumpIn = jump != 0
 	game.Settings.SevenZero = seven != 0
@@ -126,7 +126,7 @@ func ScanGame(scanner SQLScanner) (ScannedGame, error) {
 }
 
 func FetchGame(database *sql.DB, id, viewerID string) (ScannedGame, error) {
-	query := `SELECT g.id,g.status,g.created_by,u.username,g.created_at,g.started_at,g.ended_at,g.turn_time_limit,g.mode,g.is_private,g.join_code,COALESCE(gs.max_players,4),COALESCE(gs.starting_hand_size,7),COALESCE(gs.draw_penalty,2),COALESCE(gs.stack_draw_cards,0),COALESCE(gs.jump_in,0),COALESCE(gs.seven_zero,0),COALESCE(gs.draw_until_playable,0),COALESCE(gs.force_play,0),COALESCE(gs.challenge_draw_four,1),COALESCE(gs.allow_multiple_decks,0),COALESCE(gs.bots_enabled,0),(SELECT COUNT(*) FROM game_participants p WHERE p.game_id=g.id),EXISTS(SELECT 1 FROM game_participants p2 WHERE p2.game_id=g.id AND p2.user_id=?),(SELECT EXISTS(SELECT 1 FROM game_spectators s2 WHERE s2.game_id=g.id AND s2.user_id=?)),(SELECT COUNT(*) FROM game_spectators s WHERE s.game_id=g.id),(SELECT COUNT(*) FROM game_whitelist w WHERE w.game_id=g.id) FROM games g LEFT JOIN users u ON u.id=g.created_by LEFT JOIN game_settings gs ON gs.game_id=g.id WHERE g.id=?`
+	query := `SELECT g.id,g.status,g.created_by,u.username,g.created_at,g.started_at,g.ended_at,g.turn_time_limit,g.mode,g.is_private,g.join_code,COALESCE(gs.max_players,4),COALESCE(gs.starting_hand_size,7),COALESCE(gs.draw_penalty,2),COALESCE(gs.stack_draw_cards,0),COALESCE(gs.jump_in,0),COALESCE(gs.seven_zero,0),COALESCE(gs.draw_until_playable,0),COALESCE(gs.force_play,0),COALESCE(gs.challenge_draw_four,1),COALESCE(gs.allow_multiple_decks,0),COALESCE(gs.bots_enabled,0),COALESCE(gs.bot_difficulty,'intermediate'),(SELECT COUNT(*) FROM game_participants p WHERE p.game_id=g.id),EXISTS(SELECT 1 FROM game_participants p2 WHERE p2.game_id=g.id AND p2.user_id=?),(SELECT EXISTS(SELECT 1 FROM game_spectators s2 WHERE s2.game_id=g.id AND s2.user_id=?)),(SELECT COUNT(*) FROM game_spectators s WHERE s.game_id=g.id),(SELECT COUNT(*) FROM game_whitelist w WHERE w.game_id=g.id) FROM games g LEFT JOIN users u ON u.id=g.created_by LEFT JOIN game_settings gs ON gs.game_id=g.id WHERE g.id=?`
 	return ScanGame(database.QueryRow(query, viewerID, viewerID, id))
 }
 
@@ -191,15 +191,26 @@ func WriteUnoError(writer http.ResponseWriter, err error) {
 		WriteError(writer, http.StatusConflict, "not_enough_players", "At least two players are required when bots are disabled")
 	case errors.Is(err, unogame.ErrNotYourTurn):
 		WriteError(writer, http.StatusConflict, "not_your_turn", "It is not your turn")
+	case errors.Is(err, unogame.ErrNotAPlayer):
+		WriteError(writer, http.StatusForbidden, "not_a_player", "You are not seated at this table")
 	case errors.Is(err, unogame.ErrInvalidCard):
-		WriteError(writer, http.StatusConflict, "invalid_card", "This card cannot be played")
+		WriteError(writer, http.StatusConflict, "invalid_card", unoMessage(err, "This card cannot be played"))
 	case errors.Is(err, unogame.ErrInvalidAction):
-		WriteError(writer, http.StatusConflict, "invalid_action", "This UNO action is not allowed")
+		WriteError(writer, http.StatusConflict, "invalid_action", unoMessage(err, "This UNO action is not allowed"))
 	case errors.Is(err, unogame.ErrGameNotActive):
 		WriteError(writer, http.StatusConflict, "game_not_active", "This game is not active")
 	default:
 		WriteDatabaseError(writer, err)
 	}
+}
+
+func unoMessage(err error, fallback string) string {
+	message := err.Error()
+	if index := strings.Index(message, ": "); index >= 0 && index+2 < len(message) {
+		detail := message[index+2:]
+		return strings.ToUpper(detail[:1]) + detail[1:]
+	}
+	return fallback
 }
 
 func IsConstraint(err error) bool {
