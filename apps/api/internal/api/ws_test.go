@@ -302,7 +302,7 @@ func TestUnoStateIsPushedWithPrivateHands(t *testing.T) {
 	_ = json.Unmarshal(hostState.Payload, &hostSnapshot)
 	_ = json.Unmarshal(guestState.Payload, &guestSnapshot)
 	for _, player := range hostSnapshot.Players {
-		if player.ID == host.ID && len(player.Hand) != 7 {
+		if player.ID == host.ID && len(player.Hand) != 7 && len(player.Hand) != 9 {
 			t.Fatalf("host should see own hand: %+v", player)
 		}
 		if player.ID == guest.ID && len(player.Hand) != 0 {

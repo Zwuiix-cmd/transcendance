@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Badge, Button, Card, LoadingState, PageHeader, UserAvatar } from '../components/ui'
-import { DEFAULT_GAME_SETTINGS } from '../gameSettings'
+import { DEFAULT_GAME_SETTINGS, botDifficultyLabel } from '../gameSettings'
 import { useRealtimeResync, useRealtimeTopic } from '../realtime/hooks'
 import type { GameDeletedEvent, GameDetail } from '../types'
 import { requestErrorMessage } from '../utils/errors'
@@ -125,7 +125,7 @@ export function GameLobbyPage() {
       ['Force play', settings.forcePlay ? 'On' : 'Off'],
       ['Challenge +4', settings.challengeDrawFour ? 'On' : 'Off'],
       ['Multiple decks', settings.allowMultipleDecks ? 'On' : 'Off'],
-      ['Bots', settings.botsEnabled ? 'Enabled' : 'Disabled'],
+      ['Bots', settings.botsEnabled ? `${botDifficultyLabel(settings.botDifficulty)} difficulty` : 'Disabled'],
     ]
   }, [detail])
 

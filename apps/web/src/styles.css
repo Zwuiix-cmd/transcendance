@@ -2586,3 +2586,4 @@ h1 {
   background: var(--warning);
   animation: matchmaking-toast-pulse 1.2s ease-in-out infinite;
 }
+.bot-difficulty-field { margin-top: 12px; max-width: 320px; }

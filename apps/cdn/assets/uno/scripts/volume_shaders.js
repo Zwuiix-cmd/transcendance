@@ -22,8 +22,10 @@ export const hlslDefines = `
         #define SAMPLE_TEXTURE2D_LOD(tex, samp, uv, lod) textureLod(tex, uv, float(lod))
 `;
 
+export const shaderVersion = 'shaders-20261114-v30';
+
 export async function loadHlsl(path) {
-    const response = await fetch(path);
+    const response = await fetch(`${path}?v=${shaderVersion}`);
     if (!response.ok) throw new Error(`Shader failed to load: ${path} (${response.status})`);
     return response.text();
 }

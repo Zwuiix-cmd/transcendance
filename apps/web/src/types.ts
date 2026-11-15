@@ -64,7 +64,10 @@ export type GameSettings = {
   challengeDrawFour: boolean
   allowMultipleDecks: boolean
   botsEnabled: boolean
+  botDifficulty: BotDifficulty
 }
+
+export type BotDifficulty = 'easy' | 'intermediate' | 'expert'
 
 export type QueueMode = 'ranked' | 'unranked'
 
@@ -115,8 +118,43 @@ export type UnoPlayerState = {
   name: string
   bot: boolean
   finished: boolean
+  saidUno: boolean
   cardCount: number
+  handValue?: number
   hand?: string[]
+}
+
+export type UnoPhase = 'turn' | 'drawn' | 'challenge' | 'penalty' | 'swap'
+
+export type UnoEvent = {
+  type: string
+  playerId?: string
+  targetId?: string
+  card?: string
+  color?: string
+  count?: number
+  jump?: boolean
+}
+
+export type UnoRules = {
+  drawPenalty: number
+  stackDrawCards: boolean
+  jumpIn: boolean
+  sevenZero: boolean
+  drawUntilPlayable: boolean
+  forcePlay: boolean
+  challengeDrawFour: boolean
+}
+
+export type PlayerResult = {
+  rank: number
+  playerId: string
+  name: string
+  bot: boolean
+  winner: boolean
+  cardsRemaining: number
+  handPoints: number
+  pointsEarned: number
 }
 
 export type UnoSnapshot = {
@@ -125,12 +163,22 @@ export type UnoSnapshot = {
   version: number
   turnPlayerId: string
   turnNumber: number
+  direction: number
+  phase: UnoPhase
+  pendingDraw?: number
+  pendingFromId?: string
+  catchable?: string
+  skipped?: string[]
   currentColor: string
   topCard: string
   drawCount: number
   players: UnoPlayerState[]
+  playable?: number[]
+  results?: PlayerResult[]
   winnerId?: string
   lastAction: string
+  lastEvent: UnoEvent
+  rules: UnoRules
 }
 
 export type LobbySpectator = {
@@ -260,4 +308,10 @@ export type GameDeletedEvent = {
 
 export type UnoActionRequest =
   | { type: 'draw' }
-  | { type: 'play'; cardIndex: number; color: string | null }
+  | { type: 'play'; cardIndex: number; color: string | null; uno?: boolean }
+  | { type: 'pass' }
+  | { type: 'accept' }
+  | { type: 'challenge' }
+  | { type: 'uno' }
+  | { type: 'catch'; targetId: string }
+  | { type: 'swap'; targetId: string }

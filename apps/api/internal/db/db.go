@@ -147,10 +147,16 @@ func (store *Store) ensureGameBotSetting() error {
 	if err != nil {
 		return err
 	}
-	if hasBotsEnabled {
-		return nil
+	if !hasBotsEnabled {
+		if _, err = store.DB.Exec(`ALTER TABLE game_settings ADD COLUMN bots_enabled INTEGER NOT NULL DEFAULT 0 CHECK (bots_enabled IN (0, 1))`); err != nil {
+			return err
+		}
 	}
-	_, err = store.DB.Exec(`ALTER TABLE game_settings ADD COLUMN bots_enabled INTEGER NOT NULL DEFAULT 0 CHECK (bots_enabled IN (0, 1))`)
+	hasDifficulty, err := store.hasColumn("game_settings", "bot_difficulty")
+	if err != nil || hasDifficulty {
+		return err
+	}
+	_, err = store.DB.Exec(`ALTER TABLE game_settings ADD COLUMN bot_difficulty TEXT NOT NULL DEFAULT 'intermediate' CHECK (bot_difficulty IN ('easy', 'intermediate', 'expert'))`)
 	return err
 }
 

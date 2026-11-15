@@ -16,10 +16,17 @@ const float _AmbientFill = 0.3;
 
 struct Varyings { float4 positionCS; };
 
+float fogTime;
+float2 tiltRotation;
+
+float2 RotateBy(float2 p, float2 sc)
+{
+    return float2(sc.y * p.x + sc.x * p.y, -sc.x * p.x + sc.y * p.y);
+}
+
 float2 Rotate(float2 p, float angle)
 {
-    float s = sin(angle), c = cos(angle);
-    return float2(c * p.x + s * p.y, -s * p.x + c * p.y);
+    return RotateBy(p, float2(sin(angle), cos(angle)));
 }
 
 float Hash(float3 p)
@@ -44,10 +51,10 @@ float FogDensity(float3 p)
     if (_FogDensity <= 0.0) return 0.0;
     float radius = length(p);
     if (radius >= 1.0) return 0.0;
-    float time = _Time.y * _FogSpeed;
+    float time = fogTime;
     float3 q = p * _FogNoiseScale;
     q.xz = Rotate(q.xz, time * 0.4 + 0.6 * sin(p.y * 2.0 + time * 0.7));
-    q.yz = Rotate(q.yz, time * 0.23);
+    q.yz = RotateBy(q.yz, tiltRotation);
     q += 0.4 * sin(q.yzx * 1.8 + time * float3(0.7, -0.9, 0.6));
     float noise = 0.65 * Noise(q) + 0.35 * Noise(q * 2.03 + 19.1);
     float cloud = smoothstep(0.25, 0.75, noise);
@@ -109,6 +116,8 @@ half4 Frag(Varyings varyings)
     float transmission = 1.0;
     Light mainLight = GetMainLight();
     float3 lightDirection = SafeNormalize(mul(float3x3(unity_WorldToObject), mainLight.direction));
+    fogTime = _Time.y * _FogSpeed;
+    tiltRotation = float2(sin(fogTime * 0.23), cos(fogTime * 0.23));
     for (int step = 0; step < steps; step++)
     {
         float travel = start + (float(step) + jitter) * stepLength;

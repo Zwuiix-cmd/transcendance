@@ -41,25 +41,34 @@ void UpdateTrail(int2 pixel, int2 size, out float4 trail, out float4 origins)
     float2 world = _TrailMap.xy + ((float2(pixel) + 0.5) / float2(size) - 0.5) * _TrailMap.zw;
     if (_Stamp != 0)
     {
-        for (int i = 0; i <= _StampSteps; i++)
+        float2 segment = _Current.xz - _Previous.xz;
+        float2 fromStart = world - _Previous.xz;
+        float segmentLength = dot(segment, segment);
+        float along = segmentLength > 0.0 ? saturate(dot(fromStart, segment) / segmentLength) : 0.0;
+        float2 nearest = fromStart - segment * along;
+        float reach = (length(float2(166.0 / 257.0, 1.0)) * (_CardLength * _Scale) * 0.5 + _Softness * _Scale) * 1.01;
+        if (dot(nearest, nearest) <= reach * reach)
         {
-            float t = float(i) / float(_StampSteps);
-            float4 pose = lerp(_Previous, _Current, t);
-            float2 offset = world - pose.xz;
-            float s = sin(pose.w), c = cos(pose.w);
-            float2 local = float2(c * offset.x - s * offset.y, s * offset.x + c * offset.y);
-            float2 edge = abs(local) - float2(166.0 / 257.0, 1.0) * (_CardLength * _Scale) * 0.5;
-            float outside = length(max(edge, 0.0));
-            float shape = 1.0 - smoothstep(0.0, _Softness * _Scale, outside);
-            float stampAge = (1.0 - t) * _PoseInterval;
-            float strength = shape * saturate(1.0 - stampAge / _Lifetime);
-            if (strength > remaining)
+            for (int i = 0; i <= _StampSteps; i++)
             {
-                float influence = (strength - remaining) / strength;
-                elevation = lerp(elevation, pose.y, influence);
-                age = lerp(age, stampAge, influence);
-                origin = lerp(origin, pose.xz, influence);
-                remaining = strength;
+                float t = float(i) / float(_StampSteps);
+                float4 pose = lerp(_Previous, _Current, t);
+                float2 offset = world - pose.xz;
+                float s = sin(pose.w), c = cos(pose.w);
+                float2 local = float2(c * offset.x - s * offset.y, s * offset.x + c * offset.y);
+                float2 edge = abs(local) - float2(166.0 / 257.0, 1.0) * (_CardLength * _Scale) * 0.5;
+                float outside = length(max(edge, 0.0));
+                float shape = 1.0 - smoothstep(0.0, _Softness * _Scale, outside);
+                float stampAge = (1.0 - t) * _PoseInterval;
+                float strength = shape * saturate(1.0 - stampAge / _Lifetime);
+                if (strength > remaining)
+                {
+                    float influence = (strength - remaining) / strength;
+                    elevation = lerp(elevation, pose.y, influence);
+                    age = lerp(age, stampAge, influence);
+                    origin = lerp(origin, pose.xz, influence);
+                    remaining = strength;
+                }
             }
         }
     }

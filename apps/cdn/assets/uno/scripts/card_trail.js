@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import { hlslDefines, loadHlsl } from './volume_shaders.js';
+import { hlslDefines, loadHlsl } from './volume_shaders.js?v=shaders-20261114-v30';
 
 export async function createCardTrail(renderer, volumes) {
     const [compute, source, shared] = await Promise.all([
@@ -114,7 +114,7 @@ export async function createCardTrail(renderer, volumes) {
                 _Color: new THREE.Vector4(tint.r, tint.g, tint.b, 1),
                 _Scale: scale,
                 _Lifetime: settings.lifetime,
-                _Steps: 8,
+                _Steps: 32,
             }
         );
         const colorMesh = new THREE.Mesh(geometry, colorVolumeMaterial);

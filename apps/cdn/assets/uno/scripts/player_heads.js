@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { loadHlsl } from './volume_shaders.js';
+import { loadHlsl } from './volume_shaders.js?v=shaders-20261114-v30';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export async function createPlayerHeads(volumes, scene, myPlayer, seatCount = 4, roundTable = false) {
