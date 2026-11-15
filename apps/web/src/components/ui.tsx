@@ -15,7 +15,7 @@ export function Button({
 export function UnoLogo() {
   return (
     <span className="uno-logo" aria-hidden="true">
-      <svg viewBox="0 0 32 32" role="img">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img">
         <rect x="3" y="3" width="26" height="26" rx="8" fill="#a78bfa" transform="rotate(-8 16 16)" />
         <ellipse cx="16" cy="16" rx="11" ry="6" fill="#eee9fa" transform="rotate(-8 16 16)" />
         <text x="16" y="18" textAnchor="middle" fill="#292332" fontSize="6.5" fontWeight="800" fontFamily="Arial, sans-serif">UNO</text>

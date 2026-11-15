@@ -11,6 +11,7 @@ function send(name: VitalName, value: number) {
 }
 
 function observe(type: string, callback: (entry: PerformanceEntry) => void) {
+  if (typeof PerformanceObserver === 'undefined' || !PerformanceObserver.supportedEntryTypes?.includes(type)) return
   try {
     new PerformanceObserver((list) => list.getEntries().forEach(callback)).observe({ type, buffered: true } as PerformanceObserverInit)
   } catch {

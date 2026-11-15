@@ -525,13 +525,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
             if (lastSnapshot?.phase === 'swap' && lastSnapshot?.turnPlayerId === seatIds[myPlayer]) await onAction({ type: 'swap', targetId });
             else if (targetId === catchable) await onAction({ type: 'catch', targetId });
         } else if (target.userData.pile === 'discard' && selected) {
-            const cardIndex = hands[myPlayer].indexOf(selected);
-            if (networkMode) {
-                if (isWild(selected) && !selected.userData.chosenColor) return;
-                await onAction({ type: 'play', cardIndex, color: selected.userData.chosenColor ?? null });
-            } else {
-                await playCard(myPlayer, cardIndex);
-            }
+            await playSelected();
         } else if (target.userData.pile === 'draw' && drawPile.length) {
             if (networkMode) await onAction({ type: lastSnapshot?.phase === 'drawn' && lastSnapshot?.turnPlayerId === seatIds[myPlayer] ? 'pass' : 'draw' });
             else drawCard(myPlayer);
@@ -540,6 +534,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
 
     async function playSelected() {
         if (!selected || restarting || winning || queuedStates || handAnimations) return;
+        if (networkMode && selected.userData.playable === false) return;
         if (isWild(selected) && !selected.userData.chosenColor) return;
         const cardIndex = hands[myPlayer].indexOf(selected);
         if (networkMode) await onAction({ type: 'play', cardIndex, color: selected.userData.chosenColor ?? null });
@@ -630,7 +625,7 @@ export function createCardsControl(scene, camera, canvas, myPlayer, effects = {}
                 lastSnapshot = snapshot;
                 seatIds = (snapshot.players || []).map((player) => player.id);
                 catchable = snapshot.catchable || '';
-                playable = Array.isArray(snapshot.playable) ? new Set(snapshot.playable) : null;
+                playable = new Set(snapshot.playable || []);
                 markPlayable();
             } catch (error) {
                 console.error('Could not animate UNO state', error);

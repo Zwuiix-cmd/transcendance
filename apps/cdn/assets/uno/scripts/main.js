@@ -296,8 +296,14 @@ const myPlayer = networkMode ? (spectatorMode ? -1 : serverPlayerIndex) : 0;
 const cardEffects = {};
 let cardsControl;
 let actionBusy = false;
+let latestUnoState = initialUnoState;
 const requestUnoAction = async (action) => {
     if (actionBusy || !bridge) return;
+    if (!latestUnoState || spectatorMode || myPlayer < 0) return;
+    const playable = latestUnoState.playable || [];
+    const jumpIn = action.type === 'play' && latestUnoState.rules?.jumpIn && playable.includes(action.cardIndex);
+    if (latestUnoState.turnPlayerId !== viewerID && !jumpIn && action.type !== 'uno' && action.type !== 'catch') return;
+    if (action.type === 'play' && !playable.includes(action.cardIndex)) return;
     actionBusy = true;
     try {
         await bridge.action(action.type === 'play' ? { type: 'play', cardIndex: action.cardIndex, color: action.color || null } : action);
@@ -428,6 +434,7 @@ function syncHeads(snapshot) {
 
 const ruleFeedback = networkMode ? createRuleFeedback(viewerID) : null;
 async function displayState(snapshot) {
+    if (snapshot && (!latestUnoState || snapshot.version >= latestUnoState.version)) latestUnoState = snapshot;
     await cardsControl.applyServerState(snapshot);
     syncHeads(snapshot);
     ruleFeedback?.apply(snapshot);
