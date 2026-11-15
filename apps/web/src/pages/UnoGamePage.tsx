@@ -43,6 +43,7 @@ type FrameMessage =
   | { type: 'uno.ready' }
   | { type: 'uno.progress'; stage: string; ratio: number }
   | { type: 'uno.scene.ready' }
+  | { type: 'uno.animation.finished'; version: number }
   | { type: 'uno.action'; id: number; action: UnoActionRequest }
 
 function newerSnapshot(current: UnoSnapshot | null, next: UnoSnapshot) {
@@ -181,6 +182,7 @@ export function UnoGamePage() {
       }
       if (data.type === 'uno.progress' && typeof data.stage === 'string') setSceneProgress({ stage: data.stage, ratio: typeof data.ratio === 'number' ? data.ratio : 0 })
       if (data.type === 'uno.scene.ready') setSceneReady(true)
+      if (data.type === 'uno.animation.finished' && latest.current.unoState?.status === 'finished' && data.version === latest.current.unoState.version) setShowResults(true)
       if (data.type === 'uno.action' && typeof data.id === 'number' && data.action && !spectatorMode) void runAction(data.id, data.action)
     }
     window.addEventListener('message', onMessage)
@@ -198,10 +200,8 @@ export function UnoGamePage() {
   useEffect(() => {
     if (unoState?.status !== 'finished') {
       setShowResults(false)
-      return undefined
     }
-    const timer = window.setTimeout(() => setShowResults(true), 3200)
-    return () => window.clearTimeout(timer)
+    return undefined
   }, [unoState?.status])
   const results = useMemo(() => {
     if (!unoState || unoState.status !== 'finished' || !unoState.results?.length) return null

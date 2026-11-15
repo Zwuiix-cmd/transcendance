@@ -114,7 +114,7 @@ export async function createCardTrail(renderer, volumes) {
                 _Color: new THREE.Vector4(tint.r, tint.g, tint.b, 1),
                 _Scale: scale,
                 _Lifetime: settings.lifetime,
-                _Steps: 8,
+                _Steps: 32,
             }
         );
         const colorMesh = new THREE.Mesh(geometry, colorVolumeMaterial);

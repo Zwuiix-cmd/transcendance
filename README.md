@@ -1,4 +1,4 @@
-*This activity has been created as part of the 42 curriculum by Zwuiix, clfontai, julhang and two additional contributors.*
+*This activity has been created as part of the 42 curriculum by Zwuiix, clfontai, julhuang and two additional contributors.*
 
 # Uno Ranked
 
@@ -196,7 +196,7 @@ according to the actual contributions to this project:
 | --- | --- | --- |
 | `Zwuiix` | Team Leader / Product Owner / Backend contributor | Project concept and product direction, team leadership, and contribution to the backend implementation |
 | `clfontai` | REST API and CDN developer | REST API and CDN implementation, developed in collaboration with the team leader |
-| `julhang` | 3D game developer | Complete 3D client, scene, table, camera and 3D gameplay presentation |
+| `julhuang` | 3D game developer | Complete 3D client, scene, table, camera, 3D gameplay presentation and ray marched shaders |
 | Two additional team members | Developers | The remaining frontend, administration, integration and project modules |
 
 The two additional contributors are intentionally grouped here because their individual
@@ -206,7 +206,7 @@ application.
 ## Project management
 
 The work was divided by product area and service boundary. Zwuiix led the product direction and
-worked on the backend, clfontai owned the REST API and CDN work with Zwuiix, julhang owned the
+worked on the backend, clfontai owned the REST API and CDN work with Zwuiix, julhuang owned the
 3D client, and the two remaining developers handled the other application areas. Git and GitHub
 are used as the shared source-control and review history. The team coordinates implementation,
 integration and peer review directly, and every member must be able to explain the code they
@@ -270,7 +270,7 @@ The canonical schema is [`apps/api/db/schema.sql`](apps/api/db/schema.sql).
 | REST API and persistence | Zwuiix and clfontai | Go routes, SQLite schema, validation, matchmaking, game lifecycle and settlement |
 | CDN and avatar delivery | Zwuiix and clfontai | Namespaced file storage, avatar processing, cache headers and static Uno asset delivery |
 | Matchmaking and game tables | Zwuiix and the two additional developers | Ranked/unranked queues, custom tables, settings, invitations, spectators and realtime presence |
-| 3D Uno client | julhang | Three.js scene, split model loading, cards, camera, table, seats and 3D presentation |
+| 3D Uno client | julhuang | Three.js scene, split model loading, cards, camera, table, seats, 3D presentation and shaders |
 | Administration and analytics | The two additional developers | PHP administration workspace, dashboards, audit logs and player analytics |
 | Server-authoritative Uno actions | Zwuiix and clfontai | Start, state, draw and play endpoints with turn and ownership checks |
 
@@ -332,8 +332,9 @@ must understand and be able to explain the changes they submit.
   keeping the browser, API, CDN and 3D client aligned while preserving server-side authority.
 - **clfontai:** implemented the REST API and CDN with Zwuiix, including route contracts, file
   delivery and asset-serving integration.
-- **julhang:** implemented the complete 3D client and its scene presentation, including the
-  Three.js environment, split model loading, cards, table, seats and camera behavior.
+- **julhuang:** implemented the complete 3D client and its scene presentation, including the
+  Three.js environment, split model loading, cards, table, seats and camera behavior, as well
+  as the ray marched shaders and their integration in Three.js.
 - **The two additional team members:** implemented the remaining frontend, administration and
   integration work. Their individual usernames and exact feature lists must be added before
   peer review.

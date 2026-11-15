@@ -84,9 +84,10 @@
 .uno-loading-dots i:nth-child(3) { animation-delay: .4s; }
 @keyframes uno-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-4px); } }
 .uno-loading-bar { position: relative; width: 100%; height: 8px; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, .1); }
-.uno-loading-bar-fill { position: relative; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #e0353f, #f5c400, #39b54a, #2b8cf0); background-size: 300% 100%; transition: width .6s cubic-bezier(.2, .8, .2, 1); animation: uno-bar-shift 3s linear infinite; }
-.uno-loading-bar-fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .45), transparent); transform: translateX(-100%); animation: uno-bar-shine 1.6s ease-in-out infinite; }
-@keyframes uno-bar-shift { to { background-position: 300% 0; } }
+.uno-loading-bar-fill { position: relative; height: 100%; overflow: hidden; border-radius: inherit; transition: width .6s cubic-bezier(.2, .8, .2, 1); }
+.uno-loading-bar-fill::before { content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 900%; background: linear-gradient(90deg, #e0353f, #f5c400, #39b54a, #2b8cf0); background-size: calc(100% / 3) 100%; background-repeat: repeat-x; will-change: transform; animation: uno-bar-shift 3s linear infinite; }
+.uno-loading-bar-fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .45), transparent); transform: translateX(-100%); will-change: transform; animation: uno-bar-shine 1.6s ease-in-out infinite; }
+@keyframes uno-bar-shift { from { transform: translateX(0); } to { transform: translateX(calc(-200% / 3)); } }
 @keyframes uno-bar-shine { to { transform: translateX(100%); } }
 .uno-loading-meta { display: flex; justify-content: space-between; width: 100%; color: #b9a9cc; font-size: .66rem; }
 .uno-loading-meta strong { color: #f4f0e8; font-variant-numeric: tabular-nums; }
@@ -98,4 +99,4 @@
 .uno-loading-tip { min-height: 2.4em; max-width: 440px; margin: 6px 0 0; color: #d5cde0; font-size: .74rem; line-height: 1.45; animation: uno-tip-in .5s ease-out; }
 @keyframes uno-tip-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 .uno-loading-stalled { display: grid; gap: 10px; justify-items: center; margin-top: 8px; color: #aaa3b2; font-size: .66rem; }
-@media (prefers-reduced-motion: reduce) { .uno-loading *, .uno-loading { animation: none !important; transition: none !important; } .uno-loading-card { opacity: 1; transform: rotate(calc(var(--i) * 13deg)); } .uno-loading-seats li { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .uno-loading *, .uno-loading *::before, .uno-loading *::after, .uno-loading { animation: none !important; transition: none !important; } .uno-loading-card { opacity: 1; transform: rotate(calc(var(--i) * 13deg)); } .uno-loading-seats li { opacity: 1; transform: none; } }

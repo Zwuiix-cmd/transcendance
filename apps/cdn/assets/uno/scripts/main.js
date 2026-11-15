@@ -427,24 +427,21 @@ function syncHeads(snapshot) {
 }
 
 const ruleFeedback = networkMode ? createRuleFeedback(viewerID) : null;
-if (initialUnoState) {
-    cardsControl.applyServerState(initialUnoState);
-    syncHeads(initialUnoState);
-    ruleFeedback?.apply(initialUnoState);
-}
-
-bridge?.onState((snapshot) => {
-    cardsControl.applyServerState(snapshot);
+async function displayState(snapshot) {
+    await cardsControl.applyServerState(snapshot);
     syncHeads(snapshot);
     ruleFeedback?.apply(snapshot);
-    if (snapshot?.status === 'finished' && document.pointerLockElement === canvas) {
-        window.setTimeout(() => document.exitPointerLock(), 3000);
+    if (snapshot?.status === 'finished') {
+        if (document.pointerLockElement === canvas) document.exitPointerLock();
+        window.parent.postMessage({ type: 'uno.animation.finished', version: snapshot.version }, window.location.origin);
     }
-});
+}
+if (initialUnoState) void displayState(initialUnoState).catch(console.error);
+bridge?.onState((snapshot) => { void displayState(snapshot).catch(console.error); });
 
 const actionKeys = { ' ': 'pass', enter: 'accept', c: 'challenge', u: 'uno' };
 window.addEventListener('keydown', (event) => {
-    if (!networkMode || spectatorMode || myPlayer < 0 || event.repeat) return;
+    if (!networkMode || spectatorMode || myPlayer < 0 || event.repeat || event.defaultPrevented) return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     const type = actionKeys[event.key.toLowerCase()];
     if (!type) return;
