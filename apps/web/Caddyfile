@@ -3,7 +3,7 @@
 }
 
 {$SITE_ADDRESS}:80 {
-    redir https://{host}{uri} permanent
+    redir https://{$SITE_ADDRESS}:1443{uri} permanent
 }
 
 {$SITE_ADDRESS}:443 {
