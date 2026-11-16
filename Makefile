@@ -19,7 +19,7 @@ PYTHON ?= $(if $(wildcard .venv/bin/python),$(abspath .venv/bin/python),$(PYTHON
 DEBUG_AUTH_USERNAME ?= Zwuiix
 TAIL ?= 200
 
-.PHONY: help setup install python-venv build test lint audit \
+.PHONY: help setup install python-venv build test lint audit trust-cert \
 	run run-d debug down logs ps \
 	secrets format \
 	admin-grant-email clean fclean reset-data require-env \
@@ -43,6 +43,7 @@ help:
 		'Run the stack:' \
 		'  run                   Build if needed and run in the foreground' \
 		'  run-d                 Build if needed and run in the background' \
+		'  trust-cert            Install the local Caddy CA in the system trust store' \
 		'  debug                 Run the explicit local login-bypass stack' \
 		'  down                  Stop and remove containers, keep volumes' \
 		'' \
@@ -144,6 +145,12 @@ run: setup
 
 run-d: setup
 	$(COMPOSE) up -d --build
+	$(MAKE) trust-cert
+
+trust-cert: require-env
+	@set -e; mkdir -p .caddy; \
+	$(COMPOSE) exec -T web cat /data/caddy/pki/authorities/local/root.crt > .caddy/root.crt; \
+	echo 'Caddy root certificate exported to .caddy/root.crt (rootless mode).';
 
 debug: require-env
 	DEBUG_AUTH_ENABLED=true DEBUG_AUTH_USERNAME=$(DEBUG_AUTH_USERNAME) VITE_DEBUG_AUTH=true \
