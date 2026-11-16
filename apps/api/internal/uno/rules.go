@@ -323,6 +323,7 @@ func (state *gameState) drawCards(playerIndex, count int, random *rand.Rand) int
 		}
 		state.Players[playerIndex].Hand = append(state.Players[playerIndex].Hand, state.DrawPile[len(state.DrawPile)-1])
 		state.DrawPile = state.DrawPile[:len(state.DrawPile)-1]
+		state.Players[playerIndex].CardsDrawn++
 	}
 	state.refreshUnoFlags(playerIndex)
 	return drawn
@@ -524,6 +525,9 @@ func (state *gameState) play(playerIndex, cardIndex int, color string, sayUno, j
 			break
 		}
 	}
+	if played.Face == faceWildFour {
+		state.Players[playerIndex].DrawFoursPlayed++
+	}
 	remaining := make([]card, 0, len(hand)-1)
 	remaining = append(remaining, hand[:cardIndex]...)
 	remaining = append(remaining, hand[cardIndex+1:]...)
@@ -535,6 +539,7 @@ func (state *gameState) play(playerIndex, cardIndex int, color string, sayUno, j
 	if len(remaining) == 1 {
 		if sayUno {
 			state.Players[playerIndex].SaidUno = true
+			state.Players[playerIndex].UnosCalled++
 		} else if !state.Players[playerIndex].SaidUno {
 			state.Catchable = state.Players[playerIndex].ID
 		}
@@ -718,6 +723,7 @@ func (state *gameState) declareUno(playerIndex int) error {
 	default:
 		return fmt.Errorf("%w: you can only call UNO with two cards on your turn or one card before being caught", ErrInvalidAction)
 	}
+	player.UnosCalled++
 	state.LastEvent = lastEvent{Type: ActionUno, PlayerID: player.ID}
 	return nil
 }
@@ -731,6 +737,7 @@ func (state *gameState) catchPlayer(actorIndex int, targetID string, random *ran
 		return fmt.Errorf("%w: this player cannot be caught", ErrInvalidAction)
 	}
 	count := state.drawCards(targetIndex, unoPenalty, random)
+	state.Players[targetIndex].UnoPenalties++
 	state.Catchable = ""
 	state.LastAction = ActionCatch
 	state.LastEvent = lastEvent{Type: ActionCatch, PlayerID: state.Players[actorIndex].ID, TargetID: targetID, Count: count}
@@ -756,7 +763,7 @@ func (state *gameState) finishRound(winnerIndex int, lastFace string, random *ra
 			total += value
 		}
 		current := state.Players[index]
-		results = append(results, PlayerResult{PlayerID: current.ID, Name: current.Name, Bot: current.Bot, Winner: index == winnerIndex, CardsRemaining: len(current.Hand), HandPoints: value})
+		results = append(results, PlayerResult{PlayerID: current.ID, Name: current.Name, Bot: current.Bot, Winner: index == winnerIndex, CardsRemaining: len(current.Hand), HandPoints: value, UnosCalled: current.UnosCalled, UnoPenalties: current.UnoPenalties, DrawFoursPlayed: current.DrawFoursPlayed, CardsDrawn: current.CardsDrawn})
 	}
 	sort.SliceStable(results, func(left, right int) bool {
 		if results[left].Winner != results[right].Winner {

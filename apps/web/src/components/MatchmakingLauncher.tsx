@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useRef } from 'react'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
@@ -23,7 +23,7 @@ function emptyQueue(): MatchmakingStatus {
   return {
     status: 'not_waiting', mode: null, queued: false, matched: false, queueSize: 0, position: 0,
     waitedSeconds: 0, estimatedWaitSeconds: 0, ticketId: null, createdAt: null, players: [],
-    searchEloMin: null, searchEloMax: null, searchEloGap: null,
+    searchEloMin: null, searchEloMax: null, searchEloGap: null, gameId: null,
   }
 }
 
@@ -54,6 +54,8 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
   const [elapsed, setElapsed] = useState(0)
   const [launcherOpen, setLauncherOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const navigate = useNavigate()
+  const handledMatch = useRef('')
 
   const setQueue = useCallback((status: MatchmakingStatus) => {
     setQueueState(status)
@@ -68,6 +70,27 @@ export function MatchmakingProvider({ children }: { children: ReactNode }) {
       return
     }
   }, [setQueue])
+
+  useEffect(() => {
+    if (!queue.matched || !queue.gameId) return
+
+    const matchKey = queue.gameId
+
+    if (handledMatch.current === matchKey) return
+
+    handledMatch.current = matchKey
+    setLauncherOpen(false)
+
+    navigate(`/uno?game=${encodeURIComponent(matchKey)}`)
+
+    void api.leaveMatchmaking()
+      .then(() => {
+        setQueue(emptyQueue())
+      })
+      .catch(() => {
+        handledMatch.current = ''
+      })
+  }, [queue.matched, queue.gameId, navigate, setQueue])
 
   useEffect(() => {
     if (!user) return
