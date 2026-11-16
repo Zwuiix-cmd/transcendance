@@ -2,11 +2,11 @@
     auto_https disable_redirects
 }
 
-{$SITE_ADDRESS}:80 {
+{{$SITE_ADDRESS}:1080
     redir https://{$SITE_ADDRESS}:1443{uri} permanent
 }
 
-{$SITE_ADDRESS}:443 {
+{$SITE_ADDRESS}:1443 {
     tls internal
     encode gzip
 
