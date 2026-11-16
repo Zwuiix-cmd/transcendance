@@ -31,7 +31,8 @@ export async function createPlayerHeads(volumes, scene, myPlayer, seatCount = 4,
     const positions = !roundTable && seatCount <= 4
         ? [[0, 0.8], [-0.8, 0], [0, -0.8], [0.8, 0]]
         : Array.from({ length: seatCount }, (_, id) => {
-            const angle = (id / seatCount) * Math.PI * 2;
+            const relativeSeat = (id - myPlayer + seatCount) % seatCount;
+            const angle = (relativeSeat / seatCount) * Math.PI * 2;
             return [Math.sin(angle) * headRadius, Math.cos(angle) * headRadius];
         });
     for (let id = 0; id < seatCount; id++) {
