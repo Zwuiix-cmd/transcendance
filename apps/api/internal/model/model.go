@@ -255,6 +255,7 @@ type MatchmakingStatus struct {
 	SearchEloMin         *int                `json:"searchEloMin"`
 	SearchEloMax         *int                `json:"searchEloMax"`
 	SearchEloGap         *int                `json:"searchEloGap"`
+	GameID               *string             `json:"gameId"`
 }
 
 type AdminOverview struct {

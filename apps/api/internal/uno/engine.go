@@ -36,6 +36,7 @@ type Update struct {
 	GameID   string
 	Status   string
 	WinnerID string
+	Results  []PlayerResult
 	Snapshot func(viewerID string) Snapshot
 }
 
@@ -51,6 +52,11 @@ type player struct {
 	SaidUno   bool   `json:"saidUno"`
 	HandValue int    `json:"handValue"`
 	Hand      []card `json:"hand"`
+
+	UnosCalled      int `json:"unosCalled"`
+	UnoPenalties    int `json:"unoPenalties"`
+	DrawFoursPlayed int `json:"drawFoursPlayed"`
+	CardsDrawn      int `json:"cardsDrawn"`
 }
 
 type gameState struct {
@@ -89,6 +95,11 @@ type PlayerResult struct {
 	CardsRemaining int    `json:"cardsRemaining"`
 	HandPoints     int    `json:"handPoints"`
 	PointsEarned   int    `json:"pointsEarned"`
+
+	UnosCalled      int `json:"unosCalled"`
+	UnoPenalties    int `json:"unoPenalties"`
+	DrawFoursPlayed int `json:"drawFoursPlayed"`
+	CardsDrawn      int `json:"cardsDrawn"`
 }
 
 type PublicPlayer struct {
@@ -158,7 +169,15 @@ func (engine *Engine) emit(state *gameState) {
 		return
 	}
 	copied := *state
-	engine.onChange(Update{GameID: copied.GameID, Status: copied.Status, WinnerID: copied.WinnerID, Snapshot: func(viewerID string) Snapshot { return publicSnapshot(&copied, viewerID) }})
+	engine.onChange(Update{
+		GameID:   copied.GameID,
+		Status:   copied.Status,
+		WinnerID: copied.WinnerID,
+		Results:  append([]PlayerResult(nil), copied.Results...),
+		Snapshot: func(viewerID string) Snapshot {
+			return publicSnapshot(&copied, viewerID)
+		},
+	})
 }
 
 func (engine *Engine) Start(gameID, userID string) (Snapshot, error) {
@@ -264,11 +283,6 @@ func (engine *Engine) commit(tx *sql.Tx, state *gameState) error {
 	state.Version++
 	state.TurnNumber++
 	state.UpdatedAt = now()
-	if state.Status == "finished" {
-		if _, err := tx.Exec(`UPDATE games SET status='finished',ended_at=? WHERE id=?`, state.UpdatedAt, state.GameID); err != nil {
-			return err
-		}
-	}
 	if err := save(tx, state); err != nil {
 		return err
 	}

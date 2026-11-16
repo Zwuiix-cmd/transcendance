@@ -9,6 +9,13 @@ import (
 	"github.com/google/uuid"
 )
 
+type MatchPlayer struct {
+	UserID string
+	Elo    int
+}
+
+type MatchHandler func(mode string, players []MatchPlayer) (string, error)
+
 type ticket struct {
 	id        string
 	userID    string
@@ -19,6 +26,7 @@ type ticket struct {
 	players   []ticket
 	lastSent  fingerprint
 	announced bool
+	gameID    string
 }
 
 type fingerprint struct {
@@ -26,6 +34,7 @@ type fingerprint struct {
 	position  int
 	queueSize int
 	gap       int
+	gameID    string
 }
 
 // Notifier receives the new queue status of a user every time it changes.
@@ -37,6 +46,7 @@ type Queue struct {
 	mu      sync.Mutex
 	tickets map[string]*ticket
 	byUser  map[string]string
+	onMatch MatchHandler
 	notify  Notifier
 	now     func() time.Time
 	stop    chan struct{}
@@ -117,6 +127,12 @@ func (queue *Queue) Join(userID, mode string, elo int) model.MatchmakingStatus {
 	return status
 }
 
+func (queue *Queue) SetMatchHandler(handler MatchHandler) {
+	queue.mu.Lock()
+	queue.onMatch = handler
+	queue.mu.Unlock()
+}
+
 func (queue *Queue) Leave(userID string) {
 	queue.mu.Lock()
 	removed := queue.removeLocked(userID)
@@ -165,7 +181,13 @@ func fingerprintOf(status model.MatchmakingStatus) fingerprint {
 	if status.SearchEloGap != nil {
 		gap = *status.SearchEloGap
 	}
-	return fingerprint{matched: status.Matched, position: status.Position, queueSize: status.QueueSize, gap: gap}
+	return fingerprint{
+		matched:   status.Matched,
+		position:  status.Position,
+		queueSize: status.QueueSize,
+		gap:       gap,
+		gameID:    valueOrEmpty(status.GameID),
+	}
 }
 
 func (queue *Queue) removeLocked(userID string) bool {
@@ -202,14 +224,36 @@ func (queue *Queue) tryMatch(mode string) {
 		if len(match) < 2 {
 			return
 		}
-		players := make([]ticket, len(match))
+		players := make([]MatchPlayer, len(match))
+
 		for i, item := range match {
-			players[i] = *item
+			players[i] = MatchPlayer{
+				UserID: item.userID,
+				Elo:    item.elo,
+			}
 		}
+
+		if queue.onMatch == nil {
+			return
+		}
+
+		gameID, err := queue.onMatch(mode, players)
+		if err != nil || gameID == "" {
+			return
+		}
+
+		playerTickets := make([]ticket, len(match))
+
+		for i, item := range match {
+			playerTickets[i] = *item
+		}
+
 		for _, item := range match {
 			item.matchedAt = now
-			item.players = players
+			item.players = playerTickets
+			item.gameID = gameID
 		}
+
 		entries = rest
 	}
 }
@@ -253,7 +297,30 @@ func (queue *Queue) statusLocked(userID string) model.MatchmakingStatus {
 		max := entry.elo + gap
 		minElo, maxElo, eloGap = &min, &max, &gap
 	}
-	return model.MatchmakingStatus{Status: status, Mode: &mode, Queued: true, Matched: matched, QueueSize: queue.sizeMode(entry.mode), Position: queue.position(entry), WaitedSeconds: waited, EstimatedWaitSeconds: 20, TicketID: &ticketID, CreatedAt: &created, Players: players, SearchEloMin: minElo, SearchEloMax: maxElo, SearchEloGap: eloGap}
+	var gameID *string
+
+	if entry.gameID != "" {
+		value := entry.gameID
+		gameID = &value
+	}
+
+	return model.MatchmakingStatus{
+		Status:               status,
+		Mode:                 &mode,
+		Queued:               true,
+		Matched:              matched,
+		GameID:               gameID,
+		QueueSize:            queue.sizeMode(entry.mode),
+		Position:             queue.position(entry),
+		WaitedSeconds:        waited,
+		EstimatedWaitSeconds: 20,
+		TicketID:             &ticketID,
+		CreatedAt:            &created,
+		Players:              players,
+		SearchEloMin:         minElo,
+		SearchEloMax:         maxElo,
+		SearchEloGap:         eloGap,
+	}
 }
 
 func (queue *Queue) sizeMode(mode string) int {
@@ -289,4 +356,11 @@ func abs(value int) int {
 		return -value
 	}
 	return value
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

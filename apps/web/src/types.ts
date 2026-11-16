@@ -93,12 +93,17 @@ export type MatchmakingStatus = {
   searchEloMin: number | null
   searchEloMax: number | null
   searchEloGap: number | null
+  gameId: string | null
 }
 
 export type LobbyParticipant = {
   userId: string
   username: string
   host: boolean
+  unosCalled: number
+	unoPenalties: number
+	drawFourPlayed: number
+	cardsDrawn: number
 }
 
 export type WhitelistEntry = {
