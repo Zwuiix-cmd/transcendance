@@ -68,9 +68,6 @@ func Apply(tx *sql.Tx, result Result, now time.Time) (Outcome, error) {
 	if result.GameID == "" {
 		return Outcome{}, validation("game id is required")
 	}
-	if len(result.Participants) < 2 {
-		return Outcome{}, validation("at least two participants are required")
-	}
 	if err := validateInput(result.Participants); err != nil {
 		return Outcome{}, err
 	}
@@ -88,6 +85,12 @@ func Apply(tx *sql.Tx, result Result, now time.Time) (Outcome, error) {
 	}
 	if status != "waiting" && status != "in_progress" {
 		return Outcome{}, ErrGameNotActive
+	}
+	// Bot games may have only one persisted human participant. They still need
+	// to be marked finished, while ranked games must retain Elo's two-player
+	// minimum.
+	if len(result.Participants) < 2 && mode == "ranked" {
+		return Outcome{}, validation("at least two participants are required for ranked games")
 	}
 
 	stored, err := loadParticipants(tx, result.GameID)

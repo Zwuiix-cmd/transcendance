@@ -78,7 +78,7 @@ func (server *Server) publishUnoUpdate(update unogame.Update) {
 			})
 		}
 
-		if len(participants) >= 2 {
+		if len(participants) > 0 {
 			tx, err := server.store.DB.Begin()
 			if err != nil {
 				slog.Error("could not begin game settlement",
