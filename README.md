@@ -1,4 +1,4 @@
-*This activity has been created as part of the 42 curriculum by Zwuiix, clfontai, julhuang, mschyns, halexand.*
+*This activity has been created as part of the 42 curriculum by ecochin, clfontai, julhuang, mschyns, halexand.*
 
 # Uno Ranked
 
@@ -100,7 +100,7 @@ Never commit `.env`, database files or secrets. `.env` is ignored by Git.
 ### Run the complete stack
 
 ```sh
-git clone git@github.com:Zwuiix-cmd/transcendance.git
+git clone git@github.com:ecochin-cmd/transcendance.git
 cd transcendance
 make setup          # creates .env from .env.example, installs tooling
 # edit .env: replace API_KEY, INTERNAL_CDN_API_KEY and GAME_SERVICE_KEY
@@ -234,17 +234,17 @@ used by lobbies and reconnection.
 
 | Member (42 login) | Role(s) | Responsibilities |
 | --- | --- | --- |
-| **Zwuiix** | Product Owner, Tech Lead | Project concept and product direction, overall architecture (API, web, admin, CDN, schema), platform foundation, integration decisions, code review |
+| **ecochin** | Product Owner, Tech Lead | Project concept and product direction, overall architecture (API, web, admin, CDN, schema), platform foundation, integration decisions, code review |
 | **mschyns** | Developer – gameplay and matchmaking | Card effects, scoring, house rules, end-of-game results page, matchmaking-to-game pipeline, settlement wiring, pull request reviews |
 | **halexand** | Developer – real time, AI and performance | WebSocket hub and real-time client, official Uno rules on the server, AI opponents, shader optimisation, bug fixes |
-| **clfontai** | Developer – API, CDN and deployment | REST API and CDN implementation with Zwuiix, HTTPS certificate export, port configuration for 42 workstations, settlement fixes |
+| **clfontai** | Developer – API, CDN and deployment | REST API and CDN implementation with ecochin, HTTPS certificate export, port configuration for 42 workstations, settlement fixes |
 | **julhuang** | Developer – 3D client | Three.js scene, models, cards, camera, animations, networked animation logic, ray-marched shaders, performance toggles |
 
 ## Project management
 
-- **Organisation.** Zwuiix laid down the platform foundation and the service boundaries, then
+- **Organisation.** ecochin laid down the platform foundation and the service boundaries, then
   the work was split by area: gameplay and matchmaking (mschyns), real time and AI (halexand),
-  API, CDN and deployment (clfontai), 3D client (julhuang). Zwuiix arbitrated integration
+  API, CDN and deployment (clfontai), 3D client (julhuang). ecochin arbitrated integration
   questions and kept the product direction.
 - **Workflow.** Every feature lives on its own branch (`feature/websocketRefonte`,
   `feature/cards_effects`, `feature/ai`, `feature/matchmaking`, …) and reaches `main` through a
@@ -364,26 +364,26 @@ canonical schema is [`apps/api/db/schema.sql`](apps/api/db/schema.sql).
 
 | Feature | Owner(s) | Description |
 | --- | --- | --- |
-| Platform foundation and architecture | Zwuiix | Service split, Docker Compose, Caddy, Makefile, SQLite schema, routing conventions |
-| Authentication and sessions | Zwuiix | Registration, login, logout, bcrypt hashing, revocable bearer sessions, server and client validation |
-| Profiles and avatars | Zwuiix, clfontai | Profile page, bio, email and password change, avatar upload through the CDN, generated default avatars, public profiles and search |
-| Custom tables and lobbies | Zwuiix | Public and private tables, codes, whitelist, kick, status, settings form with house rules and bots |
+| Platform foundation and architecture | ecochin | Service split, Docker Compose, Caddy, Makefile, SQLite schema, routing conventions |
+| Authentication and sessions | ecochin | Registration, login, logout, bcrypt hashing, revocable bearer sessions, server and client validation |
+| Profiles and avatars | ecochin, clfontai | Profile page, bio, email and password change, avatar upload through the CDN, generated default avatars, public profiles and search |
+| Custom tables and lobbies | ecochin | Public and private tables, codes, whitelist, kick, status, settings form with house rules and bots |
 | Real-time layer | halexand | WebSocket hub, topics, per-viewer rendering, presence, React hooks replacing polling, 3D client subscription |
 | Official Uno rules on the server | halexand, mschyns | 108-card deck, turn order, action cards, wild cards, Uno call and catch, scoring from the official Mattel rules |
 | Card effects and house rules | mschyns, halexand | +2/+4 penalties and stacking, jump-in, seven-zero swaps and rotations, draw until playable, force play, +4 challenge |
 | Scoring and results page | mschyns | Hand points, points earned, ranked `results` list and the end-of-game results page |
 | AI opponents | halexand | Easy, intermediate and expert bots with distinct strategies, server-side turns, rule-aware decisions |
-| Matchmaking | Zwuiix, mschyns | Ranked and unranked queues with ELO windows, automatic game creation and redirection |
-| Settlement, ELO and statistics | Zwuiix, mschyns, clfontai | Idempotent ELO calculation, statistics counters, ELO history, bot-game handling |
-| Reconnection and spectators | Zwuiix, halexand | Reconnect endpoint, spectator endpoint and read-only table view |
-| Leaderboard and player analytics | Zwuiix | ELO leaderboard, player statistics, chart geometry computed in Go |
+| Matchmaking | ecochin, mschyns | Ranked and unranked queues with ELO windows, automatic game creation and redirection |
+| Settlement, ELO and statistics | ecochin, mschyns, clfontai | Idempotent ELO calculation, statistics counters, ELO history, bot-game handling |
+| Reconnection and spectators | ecochin, halexand | Reconnect endpoint, spectator endpoint and read-only table view |
+| Leaderboard and player analytics | ecochin | ELO leaderboard, player statistics, chart geometry computed in Go |
 | 3D client | julhuang | Three.js scene, table, chairs and glasses models, split GLB streaming, cards, camera, hands, animations synchronised with the network |
 | Volumetric shaders | julhuang, halexand | Ray-marched fog, mist, orb heads and card trails; optimisation passes for low-end GPUs |
-| Administration workspace | Zwuiix | PHP shell, dashboard KPIs, activity graphs, users, roles, ELO corrections, audit logs |
-| CDN | Zwuiix, clfontai | Namespaced uploads, validation, cache headers, 3D asset delivery |
+| Administration workspace | ecochin | PHP shell, dashboard KPIs, activity graphs, users, roles, ELO corrections, audit logs |
+| CDN | ecochin, clfontai | Namespaced uploads, validation, cache headers, 3D asset delivery |
 | HTTPS and deployment on 42 workstations | clfontai | Certificate export, rootless ports 1080/1443, Compose and Caddy adjustments |
-| Design system and accessibility | Zwuiix | Reusable components, tokens, responsive layout, ARIA attributes |
-| Legal pages | Zwuiix | Privacy policy and terms of service linked from the footer |
+| Design system and accessibility | ecochin | Reusable components, tokens, responsive layout, ARIA attributes |
+| Legal pages | ecochin | Privacy policy and terms of service linked from the footer |
 
 ## Modules
 
@@ -391,19 +391,19 @@ Point rule: Major = 2 points, Minor = 1 point. The subject requires 14 points.
 
 | Module | Type | Pts | Owner(s) | Why we chose it and how it is implemented |
 | --- | --- | --- | --- | --- |
-| Web – Frontend framework | Minor | 1 | Zwuiix | React 19 and TypeScript give typed, component-based pages. Vite builds a static bundle served by Caddy |
-| Web – Public API | Major | 2 | Zwuiix, clfontai | The API is the single contract for the web client, the 3D client and the admin proxy. API key middleware, per-client rate limiting, GET/POST/PUT/DELETE routes, JSON errors; documented in this README |
-| Web – Custom design system | Minor | 1 | Zwuiix | A small component library in `ui.tsx` with shared tokens guarantees a consistent, accessible UI across player pages |
+| Web – Frontend framework | Minor | 1 | ecochin | React 19 and TypeScript give typed, component-based pages. Vite builds a static bundle served by Caddy |
+| Web – Public API | Major | 2 | ecochin, clfontai | The API is the single contract for the web client, the 3D client and the admin proxy. API key middleware, per-client rate limiting, GET/POST/PUT/DELETE routes, JSON errors; documented in this README |
+| Web – Custom design system | Minor | 1 | ecochin | A small component library in `ui.tsx` with shared tokens guarantees a consistent, accessible UI across player pages |
 | Gaming – Complete web game | Major | 2 | mschyns, halexand, julhuang | Uno is the heart of the project. Rules, scoring, win conditions and bots run on the server; the 3D client renders the snapshots |
-| Gaming – Remote players | Major | 2 | halexand, Zwuiix | Each player uses their own machine. Per-viewer snapshots, WebSocket pushes, presence and a reconnect endpoint handle distant clients |
+| Gaming – Remote players | Major | 2 | halexand, ecochin | Each player uses their own machine. Per-viewer snapshots, WebSocket pushes, presence and a reconnect endpoint handle distant clients |
 | Gaming – Multiplayer (3+) | Major | 2 | mschyns, halexand | Tables accept 2 to 8 seats; direction, skips, stacks and seven-zero rotations are written for n players |
 | Gaming – AI opponent | Major | 2 | halexand | Lets a player train or fill a table. Three profiles with different card selection, colour choice and Uno behaviour, all respecting the house rules |
-| Gaming – Game customization | Minor | 1 | mschyns, Zwuiix | Seven house rules, hand size, capacity and bot difficulty stored per table and enforced by the engine |
-| Gaming – Spectator mode | Minor | 1 | Zwuiix, halexand | Spectators subscribe to the table topic and receive the public view of every hand |
-| User – Game statistics and history | Minor | 1 | Zwuiix, mschyns, clfontai | Settlement fills `user_stats`, `game_participants` and `user_elo_history` after every game; profiles show statistics and ELO history |
+| Gaming – Game customization | Minor | 1 | mschyns, ecochin | Seven house rules, hand size, capacity and bot difficulty stored per table and enforced by the engine |
+| Gaming – Spectator mode | Minor | 1 | ecochin, halexand | Spectators subscribe to the table topic and receive the public view of every hand |
+| User – Game statistics and history | Minor | 1 | ecochin, mschyns, clfontai | Settlement fills `user_stats`, `game_participants` and `user_elo_history` after every game; profiles show statistics and ELO history |
 | Graphics – Advanced 3D | Major | 2 | julhuang | A Three.js table with streamed models and custom ray-marched volumetric shaders gives the game its identity |
 | Realtime – WebSockets | Major | 2 | halexand | Lobbies, tables, queue, leaderboard and profiles update instantly without polling; the socket doubles as presence |
-| User – Activity analytics dashboard | Minor | 1 | Zwuiix | Admin dashboard with KPIs, activity series and distributions; public player analytics charts |
+| User – Activity analytics dashboard | Minor | 1 | ecochin | Admin dashboard with KPIs, activity series and distributions; public player analytics charts |
 
 **Total claimed: 20 points** (7 majors = 14, 6 minors = 6).
 
@@ -413,7 +413,7 @@ the schema but only `admin` grants access today).
 
 ## Individual contributions
 
-### Zwuiix – Product Owner, Tech Lead
+### ecochin – Product Owner, Tech Lead
 
 - Imagined the project and set the product direction.
 - Built the platform foundation: Go API with directory-based routing, middleware stack, SQLite
@@ -456,7 +456,7 @@ the schema but only `admin` grants access today).
 
 ### clfontai – API, CDN and deployment
 
-- Implemented the REST API and the CDN with Zwuiix: route contracts, file delivery and asset
+- Implemented the REST API and the CDN with ecochin: route contracts, file delivery and asset
   serving.
 - Made the stack run on 42 workstations without root: ports 1080/1443, Caddy and Compose
   adjustments, export of the Caddy root certificate for a trusted HTTPS.
