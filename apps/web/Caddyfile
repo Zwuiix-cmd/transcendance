@@ -2,7 +2,7 @@
     auto_https disable_redirects
 }
 
-{{$SITE_ADDRESS}:1080
+{$SITE_ADDRESS}:1080 {
     redir https://{$SITE_ADDRESS}:1443{uri} permanent
 }
 
